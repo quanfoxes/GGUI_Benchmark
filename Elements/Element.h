@@ -13,1534 +13,21 @@
 
 #include <iostream>
 
+#include "../Core/Utils/Super_String.h"
+#include "../Core/Utils/Constants.h"
+#include "../Core/Utils/Color.h"
+#include "../Core/Utils/Units.h"
+#include "../Core/Utils/Event.h"
+#include "../Core/Utils/Style.h"
+
 namespace GGUI{
-    //GGUI uses the ANSI escape code
-    //https://en.wikipedia.org/wiki/ANSI_escape_code
-
-    class UTF;
-
-    namespace UTF_FLAG{
-        constexpr inline unsigned char IS_ASCII          = 1 << 0;
-        constexpr inline unsigned char IS_UNICODE        = 1 << 1;
-        constexpr inline unsigned char ENCODE_START      = 1 << 2;
-        constexpr inline unsigned char ENCODE_END        = 1 << 3;
-    };
-
-    // And lighter-weight version of the UTF class. [Probably after making the RGBA use unsigned char instead of float, and thus making the overall size into 32 bits, replace this class with UTF.]
-    class Compact_String{
-    public:
-        union{
-            const char* Unicode_Data;
-            char Ascii_Data;
-        } Data = { nullptr };
-
-        unsigned int Size = 0;
-
-        // Only for resize!!!
-        Compact_String() = default;
-
-        Compact_String(const char* data){
-            Size = std::strlen(data); 
-
-            if (Size > 1)
-                Data.Unicode_Data = data;
-            else
-                Data.Ascii_Data = data[0];
-        }
-
-        Compact_String(char data){
-            Data.Ascii_Data = data;
-            Size = 1;
-        }
-
-        Compact_String(const char* data, unsigned int size, bool Force_Unicode = false){
-            Size = size;
-
-            if (Size > 1 || Force_Unicode)
-                Data.Unicode_Data = data;
-            else
-                Data.Ascii_Data = data[0];
-        }
-
-        char operator[](unsigned int index){
-            if (Size > 1)
-                return Data.Unicode_Data[index];
-            else
-                return Data.Ascii_Data;
-        }
-    };
-
-    // Instead of reconstructing new strings every time, this class stores the components, and then only one time constructs the final string representation.
-    class Super_String{
-    public:
-        std::vector<Compact_String> Data;
-        unsigned int Current_Index = 0;
-
-        Super_String(unsigned int Final_Size = 1){
-            Data.resize(Final_Size);
-            Current_Index = 0;
-        }
-
-        void Clear(){
-            Current_Index = 0;
-        }
-
-        void Add(const char* data, int size){
-            Data[Current_Index++] = Compact_String(data, size);
-        }
-
-        void Add(char data){
-            Data[Current_Index++] = Compact_String(data);
-        }
-
-        void Add(const std::string& data){
-            Data[Current_Index++] = Compact_String(data.data(), data.size());
-        }
-
-        void Add(Super_String* other, bool Expected = false){
-            // enlarge the reservation
-            if (!Expected)
-                Data.resize(Current_Index + other->Current_Index);
-
-            for (unsigned int i = 0; i < other->Current_Index; i++){
-
-                Data[Current_Index++] = other->Data[i];
-            }
-        }
-        
-        void Add(Super_String& other, bool Expected = false){
-            // enlarge the reservation
-            if (!Expected)
-                Data.resize(Current_Index + other.Current_Index);
-
-            for (unsigned int i = 0; i < other.Current_Index; i++){
-
-                Data[Current_Index++] = other.Data[i];
-            }
-        }
-
-        void Add(const Compact_String& other){
-            Data[Current_Index++] = other;
-        }
-
-        std::string To_String(){
-            unsigned int Overall_Size = 0;
-
-            for(unsigned int i = 0; i < Current_Index; i++){
-                Overall_Size += Data[i].Size;
-            }
-
-            std::string result;
-            result.resize(Overall_Size);
-
-            int Current_UTF_Insert_Index = 0;
-            for(unsigned int i = 0; i < Current_Index; i++){
-                Compact_String data = Data[i];
-
-                // Size of ones are always already loaded from memory into a char.
-                if (data.Size > 1){
-                    result.replace(Current_UTF_Insert_Index, data.Size, data.Data.Unicode_Data);
-
-                    Current_UTF_Insert_Index += data.Size;
-                }
-                else{
-                    result[Current_UTF_Insert_Index++] = data.Data.Ascii_Data;
-                }
-            }
-
-            return result;
-        }
-    };
-
-    namespace SYMBOLS{
-        static const std::string TOP_LEFT_CORNER = "┌";//"\e(0\x6c\e(B";
-        static const std::string BOTTOM_LEFT_CORNER = "└";//"\e(0\x6d\e(B";
-        static const std::string TOP_RIGHT_CORNER = "┐";//"\e(0\x6b\e(B";
-        static const std::string BOTTOM_RIGHT_CORNER = "┘";//"\e(0\x6a\e(B";
-        static const std::string VERTICAL_LINE = "│";//"\e(0\x78\e(B";
-        static const std::string HORIZONTAL_LINE = "─";//"\e(0\x71\e(B";
-        static const std::string VERTICAL_RIGHT_CONNECTOR = "├";//"\e(0\x74\e(B";
-        static const std::string VERTICAL_LEFT_CONNECTOR = "┤";//"\e(0\x75\e(B";
-        static const std::string HORIZONTAL_BOTTOM_CONNECTOR = "┬";//"\e(0\x76\e(B";
-        static const std::string HORIZONTAL_TOP_CONNECTOR = "┴";//"\e(0\x77\e(B";
-        static const std::string CROSS_CONNECTOR = "┼";//"\e(0\x6e\e(B";
-
-        static const std::string CENTERED_HORIZONTAL_LINE = "━";//"\e(0\x2501\e(B";
-        static const std::string FULL_BLOCK = "█";//"\e(0\x2588\e(B";
-
-        inline unsigned int CONNECTS_UP = 1 << 0;
-        inline unsigned int CONNECTS_DOWN = 1 << 1;
-        inline unsigned int CONNECTS_LEFT = 1 << 2;
-        inline unsigned int CONNECTS_RIGHT = 1 << 3;
-
-        static const std::string RADIOBUTTON_OFF = "○";
-        static const std::string RADIOBUTTON_ON = "◉";
-
-        static const std::string EMPTY_CHECK_BOX = "☐";
-        static const std::string CHECKED_CHECK_BOX = "☒";
-
-        extern GGUI::UTF EMPTY_UTF;
-    }
-
-    namespace TIME{
-        inline constexpr static  unsigned int MILLISECOND = 1; 
-        inline constexpr static  unsigned int SECOND = MILLISECOND * 1000;
-        inline constexpr static  unsigned int MINUTE = SECOND * 60;
-        inline constexpr static  unsigned int HOUR = MINUTE * 60;
-    }
-
-    // Inits with 'NOW()' when created
-    class BUTTON_STATE{
-    public:
-        bool State = false;
-        std::chrono::high_resolution_clock::time_point Capture_Time;
-
-        BUTTON_STATE(bool state = false){
-            Capture_Time = std::chrono::high_resolution_clock::now();
-            State = state;
-        }
-    };
-
-    namespace Constants{
-        namespace ANSI{
-            // 1 to ESC_CODE
-            // 1 to Text_Color | Background_Color
-            // 1 to SEPARATE
-            // 1 to USE_RGB
-            // 1 to SEPARATE
-            static const unsigned int Maximum_Needed_Pre_Allocation_For_Over_Head = 1 + 1 + 1 + 1 + 1;
-
-            // 1 to Red
-            // 1 to SEPARATE
-            // 1 to Green
-            // 1 to SEPARATE
-            // 1 to Blue
-            static const unsigned int Maximum_Needed_Pre_Allocation_For_Color = 1 + 1 + 1 + 1 + 1;
-
-            // 5 to Text_Overhead
-            // 5 to Text_Colour
-            // 1 to END_COMMAND
-            // 5 to Background_Overhead
-            // 5 to Background_Colour
-            // 1 to END_COMMAND
-            // 1 to Data
-            // 1 to RESET_COLOR
-            static const unsigned int Maximum_Needed_Pre_Allocation_For_Encoded_Super_String = 
-                Maximum_Needed_Pre_Allocation_For_Over_Head + Maximum_Needed_Pre_Allocation_For_Color + 1 +
-                Maximum_Needed_Pre_Allocation_For_Over_Head + Maximum_Needed_Pre_Allocation_For_Color + 1 + 1 + 1;
-        
-            // 1 to Escape code
-            // 1 to private SGR telltale '?'
-            // 1 to Feature to be disabled or enabled
-            // 1 to Enable/Disable feature told above.
-            static const unsigned int Maximum_Needed_Pre_Allocation_For_Enabling_Or_Disabling_Private_SGR_Feature = 1 + 1 + 1 + 1;
-        
-            // 1 to Escape code
-            // 1 to feature to be enabled
-            // 1 to END_COMMAND
-            static const unsigned int Maximum_Needed_Pre_Allocation_For_Enabling_Or_Disabling_SGR_Feature = 1 + 1 + 1;
-
-            // CSI (Control Sequence Introducer) sequences.
-            static const std::string ESC_CODE = "\x1B[";      // Also known as \e[ or \o33
-            static const std::string SEPARATE = ";";
-            static const std::string USE_RGB = "2";
-            static const std::string END_COMMAND = "m";
-            static const std::string CLEAR_SCREEN = ESC_CODE + "2J";
-            static const std::string CLEAR_SCROLLBACK = ESC_CODE + "3J";
-            static const std::string SET_CURSOR_TO_START = ESC_CODE + "H";
-            static const std::string RESET_CONSOLE = ESC_CODE + "c";
-            static const std::string RESET_COLOR = ESC_CODE + '0' + END_COMMAND;  // Basically same as RESET_SGR but baked the end command into it for Super_String
-
-            inline Super_String Enable_Private_SGR_Feature(const std::string& command, bool Enable = true) { 
-                Super_String Result(Maximum_Needed_Pre_Allocation_For_Enabling_Or_Disabling_Private_SGR_Feature);
-
-                Result.Add(ESC_CODE);
-                Result.Add('?');
-                Result.Add(command);
-
-                if (Enable)
-                    Result.Add('h');
-                else
-                    Result.Add('l');
-
-                return Result;
-            }
-
-            // SGR (Select Graphic Rendition)
-            
-            // Since most of the SGR have the disable code after 20, we can make a pair of helper functions.
-            // Also usually only those with pair of enable and disable codes are supported widely.
-            inline Super_String Enable_SGR_Feature(const std::string& command) {
-                Super_String Result(Maximum_Needed_Pre_Allocation_For_Enabling_Or_Disabling_SGR_Feature);
-
-                Result.Add(ESC_CODE);
-                Result.Add(command);
-                Result.Add(END_COMMAND);
-
-                return Result;
-            }
-
-            // SGR constants
-            static const std::string RESET_SGR = "0";                                  // Removes all SGR features. 
-            static const std::string BOLD = "1";                                       // Not widely supported!
-            static const std::string FAINT = "2";                                      // Not widely supported!
-            static const std::string ITALIC = "3";                                     // Not widely supported! (Can also be same as blink)
-            static const std::string UNDERLINE = "4";              
-            static const std::string SLOW_BLINK = "5";                                 // ~150 BPM
-            static const std::string RAPID_BLINK = "6";                                // Not widely supported!
-            static const std::string INVERT_FOREGROUND_WITH_BACKGROUND = "7";          // Not widely supported!
-            static const std::string CONCEAL = "8";                                    // Not widely supported!
-            static const std::string CROSSED_OUT = "9";                                // Not widely supported!
-            static const std::string PRIMARY_FONT = "10";                              // Sets the default font.
-            static const std::string ALTERNATIVE_FONT_1 = "11";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_2 = "12";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_3 = "13";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_4 = "14";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_5 = "15";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_6 = "16";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_7 = "17";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_8 = "18";                        // Custom font slot.
-            static const std::string ALTERNATIVE_FONT_9 = "19";                        // Custom font slot.
-            static const std::string FRAKTUR = "20";                                   // Not widely supported! (But cool font)
-            static const std::string NOT_BOLD = "21";                                  // Removes the BOLD feature
-            static const std::string NORMAL_INTENSITY = "22";                          // Removes BOLD and ITALIC and other affixes.
-            static const std::string NOT_UNDERLINE = "23";                             // Removes UNDERLINE.
-            static const std::string NOT_BLINK = "24";                                 // Removes BLINK.
-            static const std::string INVERT_INVERT_FOREGROUND_WITH_BACKGROUND = "27";  // Inverts the INVERT_FOREGROUND_WITH_BACKGROUND.
-            static const std::string TEXT_COLOR = "38";                               // Sets the foreground color.
-            static const std::string DEFAULT_TEXT_COLOR = "39";                       // Sets the default color.
-            static const std::string BACKGROUND_COLOR = "48";                         // Sets the background color.
-            static const std::string DEFAULT_BACKGROUND_COLOR = "49";                 // Sets the default color.
-
-            // Private SGR codes
-            static const std::string REPORT_MOUSE_HIGHLIGHTS = "1000";
-            static const std::string REPORT_MOUSE_BUTTON_WHILE_MOVING = "1002";
-            static const std::string REPORT_MOUSE_ALL_EVENTS = "1003";
-
-            static const std::string MOUSE_CURSOR = "25";
-            static const std::string SCREEN_CAPTURE = "47"; // 47l = restores screen, 47h = saves screen
-            static const std::string ALTERNATIVE_SCREEN_BUFFER = "1049"; // 1049l = disables alternative buffer, 1049h = enables alternative buffer
-            // End of enable settings for ANSI
-
-            // ACC (ASCII Control Characters)
-            inline char NONE = 0;
-            inline char START_OF_HEADING = 1;
-            inline char START_OF_TEXT = 2;
-            inline char END_OF_TEXT = 3;
-            inline char END_OF_TRANSMISSION = 4;
-            inline char ENQUIRY = 5;
-            inline char ACKNOWLEDGE = 6;
-            inline char BELL = 7;
-            inline char BACKSPACE = 8;
-            inline char HORIZONTAL_TAB = 9;
-            inline char LINE_FEED = 10;             // Also known as newline
-            inline char VERTICAL_TAB = 11;
-            inline char FORM_FEED = 12;
-            inline char CARRIAGE_RETURN = 13;
-            inline char SHIFT_OUT = 14;
-            inline char SHIFT_IN = 15;
-            inline char DATA_LINK_ESCAPE = 16;
-            inline char DEVICE_CONTROL_1 = 17;
-            inline char DEVICE_CONTROL_2 = 18;
-            inline char DEVICE_CONTROL_3 = 19;
-            inline char DEVICE_CONTROL_4 = 20;
-            inline char NEGATIVE_ACKNOWLEDGE = 21;
-            inline char SYNCHRONOUS_IDLE = 22;
-            inline char END_OF_TRANSMISSION_BLOCK = 23;
-            inline char CANCEL = 24;
-            inline char END_OF_MEDIUM = 25;
-            inline char SUBSTITUTE = 26;
-            inline char ESCAPE = 27;
-            inline char FILE_SEPARATOR = 28;
-            inline char GROUP_SEPARATOR = 29;
-            inline char RECORD_SEPARATOR = 30;
-            inline char UNIT_SEPARATOR = 31;
-        }
-
-        inline unsigned long long NONE = (unsigned long long)1 << 0;
-        inline unsigned long long ENTER = (unsigned long long)1 << 1;
-        inline unsigned long long ESCAPE = (unsigned long long)1 << 2;
-        inline unsigned long long BACKSPACE = (unsigned long long)1 << 3;
-        inline unsigned long long TAB = (unsigned long long)1 << 4;
-        inline unsigned long long UP = (unsigned long long)1 << 5;
-        inline unsigned long long DOWN = (unsigned long long)1 << 6;
-        inline unsigned long long LEFT = (unsigned long long)1 << 7;
-        inline unsigned long long RIGHT = (unsigned long long)1 << 8;
-        inline unsigned long long SPACE = (unsigned long long)1 << 9;
-        inline unsigned long long SHIFT = (unsigned long long)1 << 10;
-        inline unsigned long long ALT = (unsigned long long)1 << 11;
-        inline unsigned long long CONTROL = (unsigned long long)1 << 12;
-        inline unsigned long long SUPER = (unsigned long long)1 << 13;
-        inline unsigned long long HOME = (unsigned long long)1 << 14;
-        inline unsigned long long INSERT = (unsigned long long)1 << 15;
-        inline unsigned long long DELETE = (unsigned long long)1 << 16;
-        inline unsigned long long END = (unsigned long long)1 << 17;
-        inline unsigned long long PAGE_UP = (unsigned long long)1 << 18;
-        inline unsigned long long PAGE_DOWN = (unsigned long long)1 << 19;
-        inline unsigned long long F0 = (unsigned long long)1 << 20;
-        inline unsigned long long F1 = (unsigned long long)1 << 21;
-        inline unsigned long long F2 = (unsigned long long)1 << 22;
-        inline unsigned long long F3 = (unsigned long long)1 << 23;
-        inline unsigned long long F4 = (unsigned long long)1 << 24;
-        inline unsigned long long F5 = (unsigned long long)1 << 25;
-        inline unsigned long long F6 = (unsigned long long)1 << 26;
-        inline unsigned long long F7 = (unsigned long long)1 << 27;
-        inline unsigned long long F8 = (unsigned long long)1 << 28;
-        inline unsigned long long F9 = (unsigned long long)1 << 29;
-        inline unsigned long long F10 = (unsigned long long)1 << 30;
-        inline unsigned long long F11 = (unsigned long long)1 << 31;
-        inline unsigned long long F12 = (unsigned long long)1 << 32;
-        inline unsigned long long F13 = (unsigned long long)1 << 33;
-        inline unsigned long long F14 = (unsigned long long)1 << 34;
-        inline unsigned long long F15 = (unsigned long long)1 << 35;
-        inline unsigned long long F16 = (unsigned long long)1 << 36;
-
-        // Should not fucking exist bro!
-        //inline unsigned long long SHIFT_TAB = (unsigned long long)1 << 37;
-
-
-        //key_Press includes [a-z, A-Z] & [0-9]
-        inline unsigned long long KEY_PRESS = (unsigned long long)1 << 38;
-
-        // EASY MOUSE API
-        inline unsigned long long MOUSE_LEFT_CLICKED = (unsigned long long)1 << 39;
-        inline unsigned long long MOUSE_MIDDLE_CLICKED = (unsigned long long)1 << 40;
-        inline unsigned long long MOUSE_RIGHT_CLICKED = (unsigned long long)1 << 41;
-
-        // NOTE: These will be spammed until it is not pressed anymore!
-        inline unsigned long long MOUSE_LEFT_PRESSED = (unsigned long long)1 << 42;
-        inline unsigned long long MOUSE_MIDDLE_PRESSED = (unsigned long long)1 << 43;
-        inline unsigned long long MOUSE_RIGHT_PRESSED = (unsigned long long)1 << 44;
-
-        inline unsigned long long MOUSE_MIDDLE_SCROLL_UP = (unsigned long long)1 << 45;
-        inline unsigned long long MOUSE_MIDDLE_SCROLL_DOWN = (unsigned long long)1 << 46;
-    
-        // At compile time generate 0-255 representations as const char* values.
-        constexpr const char* To_String[256] = {
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
-            "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
-            "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
-            "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
-            "40", "41", "42", "43", "44", "45", "46", "47", "48", "49",
-            "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
-            "60", "61", "62", "63", "64", "65", "66", "67", "68", "69",
-            "70", "71", "72", "73", "74", "75", "76", "77", "78", "79",
-            "80", "81", "82", "83", "84", "85", "86", "87", "88", "89",
-            "90", "91", "92", "93", "94", "95", "96", "97", "98", "99",
-            "100", "101", "102", "103", "104", "105", "106", "107", "108", "109",
-            "110", "111", "112", "113", "114", "115", "116", "117", "118", "119",
-            "120", "121", "122", "123", "124", "125", "126", "127", "128", "129",
-            "130", "131", "132", "133", "134", "135", "136", "137", "138", "139",
-            "140", "141", "142", "143", "144", "145", "146", "147", "148", "149",
-            "150", "151", "152", "153", "154", "155", "156", "157", "158", "159",
-            "160", "161", "162", "163", "164", "165", "166", "167", "168", "169",
-            "170", "171", "172", "173", "174", "175", "176", "177", "178", "179",
-            "180", "181", "182", "183", "184", "185", "186", "187", "188", "189",
-            "190", "191", "192", "193", "194", "195", "196", "197", "198", "199",
-            "200", "201", "202", "203", "204", "205", "206", "207", "208", "209",
-            "210", "211", "212", "213", "214", "215", "216", "217", "218", "219",
-            "220", "221", "222", "223", "224", "225", "226", "227", "228", "229",
-            "230", "231", "232", "233", "234", "235", "236", "237", "238", "239",
-            "240", "241", "242", "243", "244", "245", "246", "247", "248", "249",
-            "250", "251", "252", "253", "254", "255"
-        };
-
-        static const Compact_String To_Compact[256] = {
-            Compact_String("0", 1), Compact_String("1", 1), Compact_String("2", 1), Compact_String("3", 1), Compact_String("4", 1), Compact_String("5", 1), Compact_String("6", 1), Compact_String("7", 1), Compact_String("8", 1), Compact_String("9", 1),
-            Compact_String("10", 2), Compact_String("11", 2), Compact_String("12", 2), Compact_String("13", 2), Compact_String("14", 2), Compact_String("15", 2), Compact_String("16", 2), Compact_String("17", 2), Compact_String("18", 2), Compact_String("19", 2),
-            Compact_String("20", 2), Compact_String("21", 2), Compact_String("22", 2), Compact_String("23", 2), Compact_String("24", 2), Compact_String("25", 2), Compact_String("26", 2), Compact_String("27", 2), Compact_String("28", 2), Compact_String("29", 2),
-            Compact_String("30", 2), Compact_String("31", 2), Compact_String("32", 2), Compact_String("33", 2), Compact_String("34", 2), Compact_String("35", 2), Compact_String("36", 2), Compact_String("37", 2), Compact_String("38", 2), Compact_String("39", 2),
-            Compact_String("40", 2), Compact_String("41", 2), Compact_String("42", 2), Compact_String("43", 2), Compact_String("44", 2), Compact_String("45", 2), Compact_String("46", 2), Compact_String("47", 2), Compact_String("48", 2), Compact_String("49", 2),
-            Compact_String("50", 2), Compact_String("51", 2), Compact_String("52", 2), Compact_String("53", 2), Compact_String("54", 2), Compact_String("55", 2), Compact_String("56", 2), Compact_String("57", 2), Compact_String("58", 2), Compact_String("59", 2),
-            Compact_String("60", 2), Compact_String("61", 2), Compact_String("62", 2), Compact_String("63", 2), Compact_String("64", 2), Compact_String("65", 2), Compact_String("66", 2), Compact_String("67", 2), Compact_String("68", 2), Compact_String("69", 2),
-            Compact_String("70", 2), Compact_String("71", 2), Compact_String("72", 2), Compact_String("73", 2), Compact_String("74", 2), Compact_String("75", 2), Compact_String("76", 2), Compact_String("77", 2), Compact_String("78", 2), Compact_String("79", 2),
-            Compact_String("80", 2), Compact_String("81", 2), Compact_String("82", 2), Compact_String("83", 2), Compact_String("84", 2), Compact_String("85", 2), Compact_String("86", 2), Compact_String("87", 2), Compact_String("88", 2), Compact_String("89", 2),
-            Compact_String("90", 2), Compact_String("91", 2), Compact_String("92", 2), Compact_String("93", 2), Compact_String("94", 2), Compact_String("95", 2), Compact_String("96", 2), Compact_String("97", 2), Compact_String("98", 2), Compact_String("99", 2),
-            Compact_String("100", 3), Compact_String("101", 3), Compact_String("102", 3), Compact_String("103", 3), Compact_String("104", 3), Compact_String("105", 3), Compact_String("106", 3), Compact_String("107", 3), Compact_String("108", 3), Compact_String("109", 3),
-            Compact_String("110", 3), Compact_String("111", 3), Compact_String("112", 3), Compact_String("113", 3), Compact_String("114", 3), Compact_String("115", 3), Compact_String("116", 3), Compact_String("117", 3), Compact_String("118", 3), Compact_String("119", 3),
-            Compact_String("120", 3), Compact_String("121", 3), Compact_String("122", 3), Compact_String("123", 3), Compact_String("124", 3), Compact_String("125", 3), Compact_String("126", 3), Compact_String("127", 3), Compact_String("128", 3), Compact_String("129", 3),
-            Compact_String("130", 3), Compact_String("131", 3), Compact_String("132", 3), Compact_String("133", 3), Compact_String("134", 3), Compact_String("135", 3), Compact_String("136", 3), Compact_String("137", 3), Compact_String("138", 3), Compact_String("139", 3),
-            Compact_String("140", 3), Compact_String("141", 3), Compact_String("142", 3), Compact_String("143", 3), Compact_String("144", 3), Compact_String("145", 3), Compact_String("146", 3), Compact_String("147", 3), Compact_String("148", 3), Compact_String("149", 3),
-            Compact_String("150", 3), Compact_String("151", 3), Compact_String("152", 3), Compact_String("153", 3), Compact_String("154", 3), Compact_String("155", 3), Compact_String("156", 3), Compact_String("157", 3), Compact_String("158", 3), Compact_String("159", 3),
-            Compact_String("160", 3), Compact_String("161", 3), Compact_String("162", 3), Compact_String("163", 3), Compact_String("164", 3), Compact_String("165", 3), Compact_String("166", 3), Compact_String("167", 3), Compact_String("168", 3), Compact_String("169", 3),
-            Compact_String("170", 3), Compact_String("171", 3), Compact_String("172", 3), Compact_String("173", 3), Compact_String("174", 3), Compact_String("175", 3), Compact_String("176", 3), Compact_String("177", 3), Compact_String("178", 3), Compact_String("179", 3),
-            Compact_String("180", 3), Compact_String("181", 3), Compact_String("182", 3), Compact_String("183", 3), Compact_String("184", 3), Compact_String("185", 3), Compact_String("186", 3), Compact_String("187", 3), Compact_String("188", 3), Compact_String("189", 3),
-            Compact_String("190", 3), Compact_String("191", 3), Compact_String("192", 3), Compact_String("193", 3), Compact_String("194", 3), Compact_String("195", 3), Compact_String("196", 3), Compact_String("197", 3), Compact_String("198", 3), Compact_String("199", 3),
-            Compact_String("200", 3), Compact_String("201", 3), Compact_String("202", 3), Compact_String("203", 3), Compact_String("204", 3), Compact_String("205", 3), Compact_String("206", 3), Compact_String("207", 3), Compact_String("208", 3), Compact_String("209", 3),
-            Compact_String("210", 3), Compact_String("211", 3), Compact_String("212", 3), Compact_String("213", 3), Compact_String("214", 3), Compact_String("215", 3), Compact_String("216", 3), Compact_String("217", 3), Compact_String("218", 3), Compact_String("219", 3),
-            Compact_String("220", 3), Compact_String("221", 3), Compact_String("222", 3), Compact_String("223", 3), Compact_String("224", 3), Compact_String("225", 3), Compact_String("226", 3), Compact_String("227", 3), Compact_String("228", 3), Compact_String("229", 3),
-            Compact_String("230", 3), Compact_String("231", 3), Compact_String("232", 3), Compact_String("233", 3), Compact_String("234", 3), Compact_String("235", 3), Compact_String("236", 3), Compact_String("237", 3), Compact_String("238", 3), Compact_String("239", 3),
-            Compact_String("240", 3), Compact_String("241", 3), Compact_String("242", 3), Compact_String("243", 3), Compact_String("244", 3), Compact_String("245", 3), Compact_String("246", 3), Compact_String("247", 3), Compact_String("248", 3), Compact_String("249", 3),
-            Compact_String("250", 3), Compact_String("251", 3), Compact_String("252", 3), Compact_String("253", 3), Compact_String("254", 3), Compact_String("255", 3)
-        };
-    }
-    
-    namespace BUTTON_STATES{
-        static const std::string ESC = "ECS";
-        static const std::string F1 = "F1";
-        static const std::string F2 = "F2";
-        static const std::string F3 = "F3";
-        static const std::string F4 = "F4";
-        static const std::string F5 = "F5";
-        static const std::string F6 = "F6";
-        static const std::string F7 = "F7";
-        static const std::string F8 = "F8";
-        static const std::string F9 = "F9";
-        static const std::string F10 = "F10";
-        static const std::string F11 = "F11";
-        static const std::string F12 = "F12";
-        static const std::string PRTSC = "PRTSC";
-        static const std::string SCROLL_LOCK = "SCROLL_LOCK";
-        static const std::string PAUSE = "PAUSE";
-        static const std::string SECTION = "SECTION";
-        static const std::string BACKSPACE = "BACKSPACE";
-        static const std::string TAB = "TAB";
-        static const std::string ENTER = "ENTER";
-        static const std::string CAPS = "CAPS";
-        static const std::string SHIFT = "SHIFT";
-        static const std::string CONTROL = "CTRL";
-        static const std::string SUPER = "SUPER";
-        static const std::string ALT = "ALT";
-        static const std::string SPACE = "SPACE";
-        static const std::string ALTGR = "ALTGR";
-        static const std::string FN = "FN";
-        static const std::string INS = "INS";
-        static const std::string HOME = "HOME";
-        static const std::string PAGE_UP = "PAGE_UP";
-        static const std::string DELETE = "DELETE";
-        static const std::string INSERT = "INSERT";
-        static const std::string END = "END";
-        static const std::string PAGE_DOWN = "PAGE_DOWN";
-
-        static const std::string UP = "UP";
-        static const std::string DOWN = "DOWN";
-        static const std::string LEFT = "LEFT";
-        static const std::string RIGHT = "RIGHT";
-
-        static const std::string MOUSE_LEFT = "MOUSE_LEFT";
-        static const std::string MOUSE_MIDDLE = "MOUSE_MIDDLE";
-        static const std::string MOUSE_RIGHT = "MOUSE_RIGHT";
-        static const std::string MOUSE_SCROLL_UP = "MOUSE_SCROLL_UP";
-        static const std::string MOUSE_SCROLL_DOWN = "MOUSE_SCROLL_DOWN";
-    };
-
-    inline std::unordered_map<std::string, unsigned long long> BUTTON_STATES_TO_CONSTANTS_BRIDGE = {
-
-        {BUTTON_STATES::ESC, Constants::ESCAPE},
-        {BUTTON_STATES::F1, Constants::F1},
-        {BUTTON_STATES::F2, Constants::F2},
-        {BUTTON_STATES::F3, Constants::F3},
-        {BUTTON_STATES::F4, Constants::F4},
-        {BUTTON_STATES::F5, Constants::F5},
-        {BUTTON_STATES::F6, Constants::F6},
-        {BUTTON_STATES::F7, Constants::F7},
-        {BUTTON_STATES::F8, Constants::F8},
-        {BUTTON_STATES::F9, Constants::F9},
-        {BUTTON_STATES::F10, Constants::F10},
-        {BUTTON_STATES::F11, Constants::F11},
-        {BUTTON_STATES::F12, Constants::F12},
-        //{BUTTON_STATES::PRTSC, Constants::PRINT_SCREEN},
-        //{BUTTON_STATES::SCROLL_LOCK, Constants::SCROLL_LOCK},
-        //{BUTTON_STATES::PAUSE, Constants::PAUSE},
-        //{BUTTON_STATES::SECTION, Constants::SECTION},
-        {BUTTON_STATES::BACKSPACE, Constants::BACKSPACE},
-        {BUTTON_STATES::TAB, Constants::TAB},
-        {BUTTON_STATES::ENTER, Constants::ENTER},
-        //{BUTTON_STATES::CAPS, Constants::CAPS},
-        {BUTTON_STATES::SHIFT, Constants::SHIFT},
-        {BUTTON_STATES::CONTROL, Constants::CONTROL},
-        {BUTTON_STATES::SUPER, Constants::SUPER},
-        {BUTTON_STATES::ALT, Constants::ALT},
-        {BUTTON_STATES::SPACE, Constants::SPACE},
-        //{BUTTON_STATES::ALTGR, Constants::ALTGR},
-        //{BUTTON_STATES::FN, Constants::FN},
-        {BUTTON_STATES::INS, Constants::INSERT},
-        {BUTTON_STATES::HOME, Constants::HOME},
-        {BUTTON_STATES::PAGE_UP, Constants::PAGE_UP},
-        {BUTTON_STATES::DELETE, Constants::DELETE},
-        {BUTTON_STATES::INSERT, Constants::INSERT},
-        {BUTTON_STATES::END, Constants::END},
-        {BUTTON_STATES::PAGE_DOWN, Constants::PAGE_DOWN},
-
-        {BUTTON_STATES::UP, Constants::UP},
-        {BUTTON_STATES::DOWN, Constants::DOWN},
-        {BUTTON_STATES::LEFT, Constants::LEFT},
-        {BUTTON_STATES::RIGHT, Constants::RIGHT},
-
-        {BUTTON_STATES::MOUSE_LEFT, Constants::MOUSE_LEFT_CLICKED},
-        {BUTTON_STATES::MOUSE_MIDDLE, Constants::MOUSE_MIDDLE_CLICKED},
-        {BUTTON_STATES::MOUSE_RIGHT, Constants::MOUSE_RIGHT_CLICKED},
-        {BUTTON_STATES::MOUSE_SCROLL_UP, Constants::MOUSE_MIDDLE_SCROLL_UP},
-        {BUTTON_STATES::MOUSE_SCROLL_DOWN, Constants::MOUSE_MIDDLE_SCROLL_DOWN},
-    };
-
-    class RGB{
-    public:
-        unsigned char Red = 0;
-        unsigned char Green = 0;
-        unsigned char Blue = 0;
-
-        constexpr RGB(unsigned char r, unsigned char g, unsigned char b, [[maybe_unused]] bool Use_Const){
-            Red = r;
-            Green = g;
-            Blue = b;
-        }
-        
-        RGB(unsigned char r, unsigned char g, unsigned char b){
-            Red = r;
-            Green = g;
-            Blue = b;
-        }
-
-        // Takes in a Hexadecimal representation of the RGB value, where 0xFFFFFF is White and 0x000000 is Black  
-        RGB(unsigned short hex){
-            Red = (hex >> 16) & 0xFF;
-            Green = (hex >> 8) & 0xFF;
-            Blue = hex & 0xFF;
-        }
-
-        RGB(){}
-
-        std::string Get_Colour() const;
-
-        // Needs the Result to be initialized with atleast Maximum_Needed_Pre_Allocation_For_Color
-        void Get_Colour_As_Super_String(Super_String* Result) const;
-    
-        std::string Get_Over_Head(bool Is_Text_Color = true) const{
-            if(Is_Text_Color){
-                return Constants::ANSI::ESC_CODE + Constants::ANSI::TEXT_COLOR + Constants::ANSI::SEPARATE + Constants::ANSI::USE_RGB + Constants::ANSI::SEPARATE;
-            }
-            else{
-                return Constants::ANSI::ESC_CODE + Constants::ANSI::BACKGROUND_COLOR + Constants::ANSI::SEPARATE + Constants::ANSI::USE_RGB + Constants::ANSI::SEPARATE;
-            }
-        }
-
-        // Needs the Result to be initialized with atleast Maximum_Needed_Pre_Allocation_For_Over_Head
-        void Get_Over_Head_As_Super_String(Super_String* Result, bool Is_Text_Color = true) const{
-            if (Is_Text_Color){
-                Result->Add(Constants::ANSI::ESC_CODE);
-                Result->Add(Constants::ANSI::TEXT_COLOR);
-                Result->Add(Constants::ANSI::SEPARATE);
-                Result->Add(Constants::ANSI::USE_RGB);
-                Result->Add(Constants::ANSI::SEPARATE);
-            }
-            else{
-                Result->Add(Constants::ANSI::ESC_CODE);
-                Result->Add(Constants::ANSI::BACKGROUND_COLOR);
-                Result->Add(Constants::ANSI::SEPARATE);
-                Result->Add(Constants::ANSI::USE_RGB);
-                Result->Add(Constants::ANSI::SEPARATE);
-            }
-        }
-    
-        bool operator==(const RGB& Other) const{
-            // only take the bits from the first 3 unsigned chars
-            return (*(unsigned int*)this & 0xFFFFFF) == (*(unsigned int*)&Other & 0xFFFFFF);
-        }
-    
-        RGB operator+(const RGB& Other) const{
-            return RGB(Red + Other.Red, Green + Other.Green, Blue + Other.Blue);
-        }
-
-    };
-
-    class RGBA : public RGB{
-    public:
-        unsigned char Alpha = std::numeric_limits<unsigned char>::max();
-
-        RGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a = std::numeric_limits<unsigned char>::max()) : RGB(r, g, b){
-            Alpha = a;
-        }
-
-        constexpr RGBA(unsigned char r, unsigned char g, unsigned char b, unsigned char a, bool Use_Const) : RGB(r, g, b, Use_Const){
-            Alpha = a;
-        }
-
-        RGBA(){}
-
-        RGBA(RGB primal) : RGB(primal){}
-    
-        // For float API's
-        constexpr void Set_Alpha(float a){
-            Alpha = (unsigned char)(a * std::numeric_limits<unsigned char>::max());
-        }
-
-        constexpr float Get_Alpha() const{
-            return (float)Alpha / std::numeric_limits<unsigned char>::max();
-        }
-
-        bool operator==(const RGBA& Other){
-            // only take the bits which are the 4 unsigned chars, which is same as single integer.
-            // Starting from Red since Red is the first member and normally Virtual function will also allocate their own space before members.
-            return *(unsigned int*)&this->Red == *(unsigned int*)&Other;
-        }
-
-        RGBA operator*(const RGBA& Other){
-            float Decimal_Alpha = Other.Get_Alpha();
-            // Make the reverse alpha
-            float Reverse_Alpha = 1 - Decimal_Alpha;
-            
-            return RGBA(
-                ((float)this->Red * Reverse_Alpha) * ((float)Other.Red * Decimal_Alpha), 
-                ((float)this->Green * Reverse_Alpha) * ((float)Other.Green * Decimal_Alpha), 
-                ((float)this->Blue * Reverse_Alpha) * ((float)Other.Blue * Decimal_Alpha),
-                Alpha
-            );
-        }
-
-        RGBA operator+(const RGBA& Other){
-            float Decimal_Alpha = Other.Get_Alpha();
-            // Make the reverse alpha
-            float Reverse_Alpha = 1 - Decimal_Alpha;
-
-            return RGBA(
-                ((float)this->Red * Reverse_Alpha) + ((float)Other.Red * Decimal_Alpha), 
-                ((float)this->Green * Reverse_Alpha) + ((float)Other.Green * Decimal_Alpha), 
-                ((float)this->Blue * Reverse_Alpha) + ((float)Other.Blue * Decimal_Alpha),
-                Alpha
-            );
-        }
-
-        RGBA operator*=(const RGBA& Other){
-            float Decimal_Alpha = Other.Get_Alpha();
-            // Make the reverse alpha
-            float Reverse_Alpha = 1 - Decimal_Alpha;
-
-            this->Red = ((float)this->Red * Reverse_Alpha) * ((float)Other.Red * Decimal_Alpha);
-            this->Green = ((float)this->Green * Reverse_Alpha) * ((float)Other.Green * Decimal_Alpha);
-            this->Blue = ((float)this->Blue * Reverse_Alpha) * ((float)Other.Blue * Decimal_Alpha);
-
-            return *this;
-        }
-
-        RGBA operator+=(const RGBA& Other){
-            float Decimal_Alpha = Other.Get_Alpha();
-            // Make the reverse alpha
-            float Reverse_Alpha = 1 - Decimal_Alpha;
-
-            this->Red = ((float)this->Red * Reverse_Alpha) + ((float)Other.Red * Decimal_Alpha);
-            this->Green = ((float)this->Green * Reverse_Alpha) + ((float)Other.Green * Decimal_Alpha);
-            this->Blue = ((float)this->Blue * Reverse_Alpha) + ((float)Other.Blue * Decimal_Alpha);
-
-            return *this;
-        }
-
-    };
-
-    namespace COLOR{
-        static constexpr RGB WHITE = RGB(255, 255, 255, true);
-        static constexpr RGB BLACK = RGB(0, 0, 0, true);
-        static constexpr RGB RED = RGB(255, 0, 0, true);
-        static constexpr RGB GREEN = RGB(0, 255, 0, true);
-        static constexpr RGB BLUE = RGB(0, 0, 255, true);
-        static constexpr RGB YELLOW = RGB(255, 255, 0, true);
-        static constexpr RGB ORANGE = RGB(255, 128, 0, true);
-        static constexpr RGB CYAN = RGB(0, 255, 255, true);
-        static constexpr RGB TEAL = RGB(0, 128, 128, true);
-        static constexpr RGB MAGENTA = RGB(255, 0, 255, true);
-        static constexpr RGB GRAY = RGB(128, 128, 128, true);
-        static constexpr RGB LIGHT_RED = RGB(255, 128, 128, true);
-        static constexpr RGB LIGHT_GREEN = RGB(128, 255, 128, true);
-        static constexpr RGB LIGHT_BLUE = RGB(128, 128, 255, true);
-        static constexpr RGB LIGHT_YELLOW = RGB(255, 255, 128, true);
-        static constexpr RGB LIGHT_CYAN = RGB(128, 255, 255, true);
-        static constexpr RGB LIGHT_MAGENTA = RGB(255, 128, 255, true);
-        static constexpr RGB LIGHT_GRAY = RGB(192, 192, 192, true);
-        static constexpr RGB DARK_RED = RGB(128, 0, 0, true);
-        static constexpr RGB DARK_GREEN = RGB(0, 128, 0, true);
-        static constexpr RGB DARK_BLUE = RGB(0, 0, 128, true);
-        static constexpr RGB DARK_YELLOW = RGB(128, 128, 0, true);
-        static constexpr RGB DARK_CYAN = RGB(0, 128, 128, true);
-        static constexpr RGB DARK_MAGENTA = RGB(128, 0, 128, true);
-        static constexpr RGB DARK_GRAY = RGB(64, 64, 64, true);
-    }
-
-    class Vector2{
-    public:
-        float X = 0;
-        float Y = 0;
-
-        Vector2(float x, float y){
-            X = x;
-            Y = y;
-        }
-
-        Vector2(){}
-
-        Vector2 operator+(float num){
-            return Vector2(X + num, Y + num);
-        }
-
-        Vector2 operator-(float num){
-            return Vector2(X - num, Y - num);
-        }
-
-        Vector2 operator*(float num){
-            return Vector2(X * num, Y * num);
-        }
-    };
-
-    class Vector3 : public Vector2{
-    public:
-        float Z = 0;
-
-        Vector3(float x, float y, float z){
-            Z = z;
-            X = x;
-            Y = y;
-        }
-
-        Vector3(){}
-    };
-
-    class Coordinates{
-    public:
-        int X = 0;  //Horizontal
-        int Y = 0;  //Vertical
-        int Z = 0;  //priority (the higher the more likely it will be at top).
-
-        Coordinates(int x = 0, int y = 0, int z = 0){
-            X = x;
-            Y = y;
-            Z = z;
-        }
-
-        void operator+=(Coordinates* other){
-            X += other->X;
-            Y += other->Y;
-            Z += other->Z;
-        }
-
-        void operator+=(Vector2 other){
-            X += other.X;
-            Y += other.Y;
-        }
-
-        void operator+=(Coordinates other){
-            X += other.X;
-            Y += other.Y;
-            Z += other.Z;
-        }
-    
-        Coordinates operator+(Coordinates& other){
-            return Coordinates(X + other.X, Y + other.Y, Z + other.Z);
-        }
-    
-        std::string To_String(){
-            return std::to_string(X) + ", " + std::to_string(Y) + ", " + std::to_string(Z);
-        }
-    };
-
-    class UTF{
-    public:
-        unsigned char FLAGS = UTF_FLAG::IS_ASCII;
-
-        char Ascii = ' ';
-        const char* Unicode = " ";
-        int Unicode_Length = 1; // Does not include the null terminator.
-
-        RGBA Foreground; 
-        RGBA Background;
-
-        UTF(){}
-
-        ~UTF(){}
-
-        constexpr UTF(const GGUI::UTF& other) : FLAGS(other.FLAGS), Ascii(other.Ascii), Unicode(other.Unicode), Unicode_Length(other.Unicode_Length), Foreground(other.Foreground), Background(other.Background){}
-
-        // {Foreground, Background}
-        UTF(char data, std::pair<RGB, RGB> color = {{}, {}}){
-            Ascii = data;
-            Foreground = {color.first};
-            Background = {color.second};
-            FLAGS = UTF_FLAG::IS_ASCII;
-        }
-
-        UTF(const char* data, std::pair<RGB, RGB> color = {{}, {}}){
-            Unicode = data;
-            Unicode_Length = std::strlen(data);
-            
-            Foreground = {color.first};
-            Background = {color.second};
-            FLAGS = UTF_FLAG::IS_UNICODE;
-        }
-
-        UTF(const std::string& data, std::pair<RGB, RGB> color = {{}, {}}){
-            Unicode = data.data();
-            Unicode_Length = data.size() - 1;
-            
-            Foreground = {color.first};
-            Background = {color.second};
-            FLAGS = UTF_FLAG::IS_UNICODE;
-        }
-
-        UTF(const Compact_String CS, std::pair<RGB, RGB> color = {{}, {}}){
-            if (CS.Size == 1){
-                Ascii = CS.Data.Ascii_Data;
-                Foreground = {color.first};
-                Background = {color.second};
-                FLAGS = UTF_FLAG::IS_ASCII;
-            }
-            else{
-                Unicode = CS.Data.Unicode_Data;
-                Unicode_Length = CS.Size;
-                Foreground = {color.first};
-                Background = {color.second};
-                FLAGS = UTF_FLAG::IS_UNICODE;
-            }
-        }
-
-        bool Is(unsigned char utf_flag){
-            // Check if the bit mask contains the bits
-            return (FLAGS & utf_flag) > 0;
-        }
-
-        void Set_Flag(unsigned char utf_flag){
-            FLAGS |= utf_flag;
-        }
-
-        void Set_Foreground(RGB color){
-            Foreground = color;
-        }
-
-        void Set_Background(RGB color){
-            Background = color;
-        }
-
-        void Set_Color(std::pair<RGB, RGB> primals){
-            Foreground = primals.first;
-            Background = primals.second;
-        }
-
-        void Set_Text(std::string data){
-            Unicode = data.data();
-            Unicode_Length = data.size() -1;
-            FLAGS = UTF_FLAG::IS_UNICODE;
-        }
-
-        void Set_Text(char data){
-            Ascii = data;
-            FLAGS = UTF_FLAG::IS_ASCII;
-        }
-
-        void Set_Text(const char* data){
-            Unicode = data;
-            Unicode_Length = std::strlen(data);
-            FLAGS = UTF_FLAG::IS_UNICODE;
-        }
-
-        void Set_Text(UTF other){
-            Ascii = other.Ascii;
-            Unicode = other.Unicode;
-            Unicode_Length = other.Unicode_Length;
-            FLAGS = other.FLAGS;
-        }
-
-        std::string To_String();
-        std::string To_Encoded_String();    // For UTF Strip Encoding.
-
-        // Needs Result to be initalized with Maximum_Needed_Pre_Allocation_For_Super_String at max.
-        void To_Super_String(GGUI::Super_String* Result, Super_String* Text_Overhead, Super_String* Background_Overhead, Super_String* Text_Colour, Super_String* Background_Colour);
-        
-        // Needs Result to be initalized with Maximum_Needed_Pre_Allocation_For_Super_String at max.
-        void To_Encoded_Super_String(Super_String* Result, Super_String* Text_Overhead, Super_String* Background_Overhead, Super_String* Text_Colour, Super_String* Background_Colour);
-
-        void operator=(char text){
-            Set_Text(text);
-        }
-
-        void operator=(const std::string& text){
-            Set_Text(text);
-        }
-
-        UTF& operator=(const UTF& other){
-            Ascii = other.Ascii;
-            Unicode = other.Unicode;
-            Unicode_Length = other.Unicode_Length;
-            FLAGS = other.FLAGS;
-            Foreground = other.Foreground;
-            Background = other.Background;
-
-            return *this;
-        }
-
-        inline bool Has_Default_Text(){
-            if (Is(UTF_FLAG::IS_ASCII))
-                return Ascii == ' ';
-            else
-                return Unicode[0] == ' ';
-        }
-
-    };
-
-    class Event{
-    public:
-        unsigned long long Criteria;
-    };
-
-    class Input : public Event{
-    public:
-        char Data = 0;
-        unsigned int X = 0;
-        unsigned int Y = 0;
-        int Scale = 1;
-
-        // The input information like the character written.
-        Input(char d, unsigned long long t){
-            Data = d;
-            Criteria = t;
-        }
-
-        Input(Coordinates c, unsigned long long t, int s = 1){
-            X = c.X;
-            Y = c.Y;
-            Criteria = t;
-            Scale = s;
-        }
-    };
-
-    class Action : public Event{
-    public:
-        class Element* Host = nullptr;
-
-        std::function<bool(GGUI::Event*)> Job;
-        
-        std::string ID; 
-    
-        Action() = default;
-        Action(unsigned long long criteria, std::function<bool(GGUI::Event*)> job, std::string id = ""){
-            Criteria = criteria;
-            Job = job;
-            Host = nullptr;
-            ID = id;
-        }
-
-        Action(unsigned long long criteria, std::function<bool(GGUI::Event*)> job, class Element* host, std::string id = ""){
-            Criteria = criteria;
-            Job = job;
-            Host = host;
-            ID = id;
-        }
-    };
-
-    namespace MEMORY_FLAGS{
-        inline unsigned char PROLONG_MEMORY     = 1 << 0;
-        inline unsigned char RETRIGGER          = 1 << 1;
-    };
-
-    class Memory : public Action{
-    public:
-        std::chrono::high_resolution_clock::time_point Start_Time;
-        size_t End_Time = 0;
-
-        // By default all memories automatically will not prolong each other similar memories.
-        unsigned char Flags = 0x0;
-
-        // When the job starts, job, prolong previous similar job by this time.
-        Memory(size_t end, std::function<bool(GGUI::Event*)>job, unsigned char flags = 0x0, std::string id = ""){
-            Start_Time = std::chrono::high_resolution_clock::now();
-            End_Time = end;
-            Job = job;
-            Flags = flags;
-            ID = id;
-        }
-
-        bool Is(unsigned char f){
-            return (Flags & f) > 0;
-        }
-
-        void Set(unsigned char f){
-            Flags |= f;
-        }
-    };
-
-    // --STYLING STUFF--
-
-    enum class ALIGN{
-        UP,
-        DOWN,
-        LEFT,
-        RIGHT,
-        CENTER
-    };
-
-    enum class VALUE_STATE{
-        UNINITIALIZED,
-        INITIALIZED,
-        VALUE
-    };
-
-    enum class DIRECTION{
-        ROW,
-        COLUMN
-    };
-
-    class VALUE{
-    public:
-        VALUE_STATE Status = VALUE_STATE::UNINITIALIZED;
-
-        constexpr VALUE(VALUE_STATE status, [[maybe_unused]] bool use_constexpr) : Status(status){}
-        
-        VALUE(VALUE_STATE status) : Status(status){}
-
-        VALUE() = default;
-    };
-
-    class MARGIN_VALUE : public VALUE{
-    public:
-        unsigned int Top = 0;
-        unsigned int Bottom = 0;
-        unsigned int Left = 0;
-        unsigned int Right = 0;
-
-        MARGIN_VALUE(unsigned int top = 0, unsigned int bottom = 0, unsigned int left = 0, unsigned int right = 0, VALUE_STATE Default = VALUE_STATE::VALUE) : VALUE(Default){
-            Top = top;
-            Bottom = bottom;
-            Left = left;
-            Right = right;
-        }
-
-        // operator overload for copy operator
-        MARGIN_VALUE& operator=(const MARGIN_VALUE& other){
-            // Only copy the information if the other is enabled.
-            if (other.Status >= Status){
-                Top = other.Top;
-                Bottom = other.Bottom;
-                Left = other.Left;
-                Right = other.Right;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-
-        constexpr MARGIN_VALUE(const GGUI::MARGIN_VALUE& other) : VALUE(other.Status, true){
-            Top = other.Top;
-            Bottom = other.Bottom;
-            Left = other.Left;
-            Right = other.Right;
-        }
-    };
-
-    class COORDINATES_VALUE : public VALUE{
-    public:
-        Coordinates Value = Coordinates();
-
-        COORDINATES_VALUE(Coordinates value, VALUE_STATE Default = VALUE_STATE::VALUE) : VALUE(Default){
-            Value = value;
-        }
-
-        COORDINATES_VALUE() = default;
-
-        // operator overload for copy operator
-        COORDINATES_VALUE& operator=(const COORDINATES_VALUE& other){
-            // Only copy the information if the other is enabled.
-            if (other.Status >= Status){
-                Value = other.Value;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-
-        COORDINATES_VALUE& operator=(const GGUI::Coordinates other){
-            Value = other;
-            Status = VALUE_STATE::VALUE;
-            return *this;
-        }
-
-        constexpr COORDINATES_VALUE(const GGUI::COORDINATES_VALUE& other) : VALUE(other.Status, true), Value(other.Value){}
-    };
-
-    class SHADOW_VALUE : public VALUE{
-    public:
-        Vector3 Direction = {0, 0, 0.5};
-        RGB Color = {};
-        float Opacity = 1;
-        bool Enabled = false;
-
-        SHADOW_VALUE(Vector3 direction, RGB color, float opacity, bool enabled, VALUE_STATE Default = VALUE_STATE::VALUE) : VALUE(Default){
-            Direction = direction;
-            Color = color;
-            Opacity = opacity;
-            Enabled = enabled;
-        }
-
-        SHADOW_VALUE() : VALUE(){}
-
-        SHADOW_VALUE& operator=(const SHADOW_VALUE& other){
-            // Only copy the information if the other is enabled.
-            if (other.Status >= Status){
-                Direction = other.Direction;
-                Color = other.Color;
-                Opacity = other.Opacity;
-                Enabled = other.Enabled;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-    
-        constexpr SHADOW_VALUE(const GGUI::SHADOW_VALUE& other) : VALUE(other.Status, true), Direction(other.Direction), Color(other.Color), Opacity(other.Opacity), Enabled(other.Enabled){}
-    };
-
-    class BORDER_STYLE_VALUE : public VALUE{
-    public:
-        const char* TOP_LEFT_CORNER             = "┌";//"\e(0\x6c\e(B";
-        const char* BOTTOM_LEFT_CORNER          = "└";//"\e(0\x6d\e(B";
-        const char* TOP_RIGHT_CORNER            = "┐";//"\e(0\x6b\e(B";
-        const char* BOTTOM_RIGHT_CORNER         = "┘";//"\e(0\x6a\e(B";
-        const char* VERTICAL_LINE               = "│";//"\e(0\x78\e(B";
-        const char* HORIZONTAL_LINE             = "─";//"\e(0\x71\e(B";
-        const char* VERTICAL_RIGHT_CONNECTOR    = "├";//"\e(0\x74\e(B";
-        const char* VERTICAL_LEFT_CONNECTOR     = "┤";//"\e(0\x75\e(B";
-        const char* HORIZONTAL_BOTTOM_CONNECTOR = "┬";//"\e(0\x76\e(B";
-        const char* HORIZONTAL_TOP_CONNECTOR    = "┴";//"\e(0\x77\e(B";
-        const char* CROSS_CONNECTOR             = "┼";//"\e(0\x6e\e(B";
-
-        BORDER_STYLE_VALUE(std::vector<const char*> values, VALUE_STATE Default = VALUE_STATE::VALUE);
-
-        // Re-import defaults:
-        BORDER_STYLE_VALUE() = default; // This should also call the base class
-        ~BORDER_STYLE_VALUE() = default;
-        BORDER_STYLE_VALUE& operator=(const BORDER_STYLE_VALUE& other){
-            if (other.Status >= Status){
-                TOP_LEFT_CORNER = other.TOP_LEFT_CORNER;
-                BOTTOM_LEFT_CORNER = other.BOTTOM_LEFT_CORNER;
-                TOP_RIGHT_CORNER = other.TOP_RIGHT_CORNER;
-                BOTTOM_RIGHT_CORNER = other.BOTTOM_RIGHT_CORNER;
-                VERTICAL_LINE = other.VERTICAL_LINE;
-                HORIZONTAL_LINE = other.HORIZONTAL_LINE;
-                VERTICAL_RIGHT_CONNECTOR = other.VERTICAL_RIGHT_CONNECTOR;
-                VERTICAL_LEFT_CONNECTOR = other.VERTICAL_LEFT_CONNECTOR;
-                HORIZONTAL_BOTTOM_CONNECTOR = other.HORIZONTAL_BOTTOM_CONNECTOR;
-                HORIZONTAL_TOP_CONNECTOR = other.HORIZONTAL_TOP_CONNECTOR;
-                CROSS_CONNECTOR = other.CROSS_CONNECTOR;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-    
-        constexpr BORDER_STYLE_VALUE(const GGUI::BORDER_STYLE_VALUE& other) : VALUE(other.Status, true){
-            TOP_LEFT_CORNER = other.TOP_LEFT_CORNER;
-            BOTTOM_LEFT_CORNER = other.BOTTOM_LEFT_CORNER;
-            TOP_RIGHT_CORNER = other.TOP_RIGHT_CORNER;
-            BOTTOM_RIGHT_CORNER = other.BOTTOM_RIGHT_CORNER;
-            VERTICAL_LINE = other.VERTICAL_LINE;
-            HORIZONTAL_LINE = other.HORIZONTAL_LINE;
-            VERTICAL_RIGHT_CONNECTOR = other.VERTICAL_RIGHT_CONNECTOR;
-            VERTICAL_LEFT_CONNECTOR = other.VERTICAL_LEFT_CONNECTOR;
-            HORIZONTAL_BOTTOM_CONNECTOR = other.HORIZONTAL_BOTTOM_CONNECTOR;
-            HORIZONTAL_TOP_CONNECTOR = other.HORIZONTAL_TOP_CONNECTOR;
-            CROSS_CONNECTOR = other.CROSS_CONNECTOR;
-        }
-    };
-
-    class RGB_VALUE : public VALUE{
-    public:
-        RGB Value = RGB(0, 0, 0);
-
-        RGB_VALUE(RGB value, VALUE_STATE Default = VALUE_STATE::VALUE) : VALUE(Default){
-            Value = value;
-        }
-
-        RGB_VALUE() = default;
-
-        // operator overload for copy operator
-        RGB_VALUE& operator=(const RGB_VALUE& other){
-            // Only copy the information if the other is enabled.
-            if (other.Status >= Status){
-                Value = other.Value;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-
-        RGB_VALUE& operator=(const GGUI::RGB other){
-            Value = other;
-            Status = VALUE_STATE::VALUE;
-            return *this;
-        }
-    
-        constexpr RGB_VALUE(const GGUI::RGB_VALUE& other) : VALUE(other.Status, true), Value(other.Value){}
-    };
-
-    class BOOL_VALUE : public VALUE{
-    public:
-        bool Value = false;
-
-        BOOL_VALUE(bool value, VALUE_STATE Default = VALUE_STATE::VALUE) : VALUE(Default){
-            Value = value;
-        }
-
-        BOOL_VALUE() = default;
-
-        // operator overload for copy operator
-        BOOL_VALUE& operator=(const BOOL_VALUE& other){
-            // Only copy the information if the other is enabled.
-            if (other.Status >= Status){
-                Value = other.Value;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-
-        BOOL_VALUE& operator=(const bool other){
-            Value = other;
-            Status = VALUE_STATE::VALUE;
-            return *this;
-        }
-    
-        constexpr BOOL_VALUE(const GGUI::BOOL_VALUE& other) : VALUE(other.Status, true), Value(other.Value){}
-    };
-    
-    class NUMBER_VALUE : public VALUE{
-    public:
-        int Value = 0;
-
-        NUMBER_VALUE(int value, VALUE_STATE Default = VALUE_STATE::VALUE) : VALUE(Default){
-            Value = value;
-        }
-
-        NUMBER_VALUE() = default;
-
-        // operator overload for copy operator
-        NUMBER_VALUE& operator=(const NUMBER_VALUE& other){
-            // Only copy the information if the other is enabled.
-            if (other.Status >= Status){
-                Value = other.Value;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-
-        NUMBER_VALUE& operator=(const int other){
-            Value = other;
-            Status = VALUE_STATE::VALUE;
-            return *this;
-        }
-    
-        constexpr NUMBER_VALUE(const GGUI::NUMBER_VALUE& other) : VALUE(other.Status, true), Value(other.Value){}
-    };
-
-    template<typename T>
-    class ENUM_VALUE : public VALUE{
-    public:
-        T Value;
-
-        ENUM_VALUE(T value, VALUE_STATE Default = VALUE_STATE::INITIALIZED) : VALUE(Default){
-            Value = value;
-        }
-
-        ENUM_VALUE() = default;
-
-        // operator overload for copy operator
-        ENUM_VALUE& operator=(const ENUM_VALUE& other){
-            // Only copy the information if the other is enabled.
-            if (other.Status >= Status){
-                Value = other.Value;
-
-                Status = other.Status;
-            }
-            return *this;
-        }
-
-        ENUM_VALUE& operator=(const T other){
-            Value = other;
-            Status = VALUE_STATE::VALUE;
-            return *this;
-        }
-    
-        constexpr ENUM_VALUE(const GGUI::ENUM_VALUE<T>& other) : VALUE(other.Status, true), Value(other.Value){}
-    };
-
-    class Styling{
-    public:
-        BOOL_VALUE Border_Enabled = BOOL_VALUE(false, VALUE_STATE::INITIALIZED);
-        RGB_VALUE Text_Color;
-        RGB_VALUE Background_Color;
-        RGB_VALUE Border_Color;
-        RGB_VALUE Border_Background_Color;
-        
-        RGB_VALUE Hover_Border_Color;
-        RGB_VALUE Hover_Text_Color;
-        RGB_VALUE Hover_Background_Color;
-        RGB_VALUE Hover_Border_Background_Color;
-
-        RGB_VALUE Focus_Border_Color;
-        RGB_VALUE Focus_Text_Color;
-        RGB_VALUE Focus_Background_Color;
-        RGB_VALUE Focus_Border_Background_Color;
-
-        BORDER_STYLE_VALUE Border_Style;
-        
-        ENUM_VALUE<DIRECTION> Flow_Priority = ENUM_VALUE<DIRECTION>(DIRECTION::ROW, VALUE_STATE::INITIALIZED);
-        BOOL_VALUE Wrap = BOOL_VALUE(false, VALUE_STATE::INITIALIZED);
-
-        BOOL_VALUE Allow_Overflow = BOOL_VALUE(false, VALUE_STATE::INITIALIZED);
-        BOOL_VALUE Allow_Dynamic_Size = BOOL_VALUE(false, VALUE_STATE::INITIALIZED);
-        MARGIN_VALUE Margin;
-
-        SHADOW_VALUE Shadow;
-        NUMBER_VALUE Opacity = NUMBER_VALUE(100, VALUE_STATE::INITIALIZED);  // 100%
-
-        BOOL_VALUE Allow_Scrolling = BOOL_VALUE(false, VALUE_STATE::INITIALIZED);
-
-        // Only fetch one parent UP, and own position +, then child repeat.
-        COORDINATES_VALUE Absolute_Position_Cache;
-
-        ENUM_VALUE<ALIGN> Align = ENUM_VALUE<ALIGN>(ALIGN::LEFT, VALUE_STATE::INITIALIZED);
-
-        Styling() = default;
-
-        void Copy(const Styling& other);
-
-        void Copy(const Styling* other){
-            // use the reference one
-            Copy(*other);
-        }
-    };
-
-    namespace STYLES{
-        namespace BORDER{
-            const inline BORDER_STYLE_VALUE Double = std::vector<const char*>{
-                "╔", "╚", "╗", "╝", "║", "═", "╠", "╣", "╦", "╩", "╬"
-            };
-
-            const inline BORDER_STYLE_VALUE Round = std::vector<const char*>{
-                "╭", "╰", "╮", "╯", "│", "─", "├", "┤", "┬", "┴", "┼"
-            };
-
-            const inline BORDER_STYLE_VALUE Single = std::vector<const char*>{
-                "┌", "└", "┐", "┘", "│", "─", "├", "┤", "┬", "┴", "┼"
-            };
-
-            const inline BORDER_STYLE_VALUE Bold = std::vector<const char*>{
-                "▛", "▙", "▜", "▟", "█", "▅", "▉", "▉", "▉", "▉", "▉"
-            };
-
-            const inline BORDER_STYLE_VALUE Modern = std::vector<const char*>{
-                "/", "\\", "\\", "/", "|", "-", "|", "|", "-", "-", "+"
-            };
-            
-        }
-    };
-
-    // --END OF STYLING STUFF--
-
-    enum class STAIN_TYPE{
-        CLEAN = 0,              // No change
-        COLOR = 1 << 0,         // BG and other color related changes
-        EDGE = 1 << 1,          // Title and border changes.
-        DEEP = 1 << 2,          // Children changes. Deep because the childs are connected via AST.
-        STRETCH = 1 << 3,       // Width and or height changes.
-        CLASS = 1 << 5,         // This is used to tell the renderer that there are still un_parsed classes.
-        STATE = 1 << 6,         // This is for Switches that based on their state display one symbol differently. And also for state handlers.
-        MOVE = 1 << 7,          // Enabled, to signal absolute position caching.
-    };
- 
-    inline unsigned int operator|(STAIN_TYPE a, STAIN_TYPE b){
-        return (unsigned int)a | (unsigned int)b;
-    }
-
-    inline unsigned int operator|(STAIN_TYPE a, unsigned int b){
-        return (unsigned int)a | b;
-    }
-
-    inline unsigned int operator|(unsigned int a, STAIN_TYPE b){
-        return a | (unsigned int)b;
-    }
-
-    class STAIN{
-    public:
-        STAIN_TYPE Type = STAIN_TYPE::CLEAN; //(STAIN_TYPE)(STAIN_TYPE::COLOR | STAIN_TYPE::EDGE | STAIN_TYPE::DEEP | STAIN_TYPE::STRETCH | STAIN_TYPE::CLASS | STAIN_TYPE::MOVE);
-
-
-        bool is(STAIN_TYPE f){
-            if (f == STAIN_TYPE::CLEAN){
-                return Type <= f;
-            }
-            return ((unsigned int)Type & (unsigned int)f) == (unsigned int)f;
-        }
-
-        void Clean(STAIN_TYPE f){
-            Type = (STAIN_TYPE)((unsigned int)Type & ~(unsigned int)f);
-        }
-
-        void Clean(unsigned int f){
-            Type = (STAIN_TYPE)((unsigned int)Type & ~f);
-        }
-
-        void Dirty(STAIN_TYPE f){
-            Type = (STAIN_TYPE)((unsigned int)Type | (unsigned int)f);
-        }
-
-        void Dirty(unsigned int f){
-            Type = (STAIN_TYPE)((unsigned int)Type | f);
-        }
-
-        // void Stain_All(){
-        //     Dirty(STAIN_TYPE::COLOR | STAIN_TYPE::EDGE | STAIN_TYPE::DEEP | STAIN_TYPE::STRETCH | STAIN_TYPE::CLASS | STAIN_TYPE::MOVE);
-        // }
-
-    };
-
-    enum class Flags{
-        Empty = 0,
-        Border = 1 << 0,
-        Text_Input = 1 << 1,
-        Overflow = 1 << 2,
-        Dynamic = 1 << 3,
-        Horizontal = 1 << 4,
-        Vertical = 1 << 5,
-        Align_Left = 1 << 6,
-        Align_Right = 1 << 7,
-        Align_Center = 1 << 8,
-    };
-    
-    inline Flags operator|(Flags a, Flags b){
-        return static_cast<Flags>(static_cast<int>(a) | static_cast<int>(b));
-    }
-
-    inline bool Is(Flags a, Flags b){
-        return ((int)a & (int)b) == (int)b;
-    }
-
-    inline bool Has(Flags a, Flags b){
-        return ((int)a & (int)b) != 0;
-    }
-
-    enum class State{
-        UNKNOWN,
-
-        RENDERED,
-        HIDDEN
-
-    };
-
-    namespace SETTINGS{
-        // How fast for a detection of hold down situation.
-        inline unsigned long long Mouse_Press_Down_Cooldown = 365;
-        inline bool Word_Wrapping = true;
-        inline std::chrono::milliseconds Thread_Timeout = std::chrono::milliseconds(256);
-    };
-
-    // For templates.
-    extern std::vector<Action*> Event_Handlers;
-
     class Element{
     protected:
-        Coordinates Position;
-
-        unsigned int Width = 1;
-        unsigned int Height = 1;
-
         unsigned int Post_Process_Width = 0;
         unsigned int Post_Process_Height = 0;
+
+        // Only fetch one parent UP, and own position +, then child repeat.
+        IVector3 Absolute_Position_Cache;
 
         //INTERNAL FLAGS
         class Element* Parent = nullptr;
@@ -1551,8 +38,6 @@ namespace GGUI{
         STAIN Dirty;
         
         std::vector<int> Classes;
-
-        std::vector<Element*> Childs;
 
         bool Focused = false;
         bool Hovered = false;
@@ -1565,48 +50,63 @@ namespace GGUI{
         std::unordered_map<State, std::function<void()>> State_Handlers;
     public:
 
+        /**
+         * The constructor for the Element class.
+         *
+         * This constructor is used when an Element is created without a parent.
+         * In this case, the Element is created as a root object, and it will be
+         * automatically added to the list of root objects.
+         *
+         * @param None
+         */
         Element();
 
-        Element(std::string Class, unsigned int width = 0, unsigned int height = 0, Element* parent = nullptr, Coordinates *position = nullptr);
+        /**
+         * The constructor for the Element class that accepts a Styling object.
+         *
+         * This constructor is used when an Element is created without a parent.
+         * In this case, the Element is created as a root object, and it will be
+         * automatically added to the list of root objects.
+         *
+         * @param s The Styling object to use for the Element.
+         */
+        Element(Styling s);
 
-        Element(Styling css, unsigned int width = 0, unsigned int height = 0, Element* parent = nullptr, Coordinates *position = nullptr);
-
-        Element(
-            unsigned int width,
-            unsigned int height,
-            Coordinates position
-        );
-
-        //These next constructors are mainly for users to more easily create elements.
-        Element(
-            unsigned int width,
-            unsigned int height
-        );
-
-        Element(
-            unsigned int width,
-            unsigned int height,
-            RGB text_color,
-            RGB background_color
-        );
-
-        Element(
-            unsigned int width,
-            unsigned int height,
-            RGB text_color,
-            RGB background_color,
-            RGB border_color,
-            RGB border_background_color
-        );
-
-        // Disable Copy constructor
+        
+        /**
+         * @brief Copy constructor for the Element class.
+         *
+         * This constructor is disabled and should not be used.
+         * Instead, use the Copy() method to create a copy of an Element.
+         *
+         * @param copyable The Element object to be copied.
+         */
         Element(const Element&);
 
+        /**
+         * @brief Assignment operator for the Element class.
+         *
+         * This operator is used to assign the values from one Element object
+         * to another. The default implementation is used, which performs
+         * a member-wise copy of the element's properties.
+         *
+         * @param other The Element object to assign from.
+         * @return A reference to the assigned Element object.
+         */
         Element& operator=(const GGUI::Element&) = default;
 
         //Start of destructors.
         //-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_
 
+        /**
+         * @brief The destructor for the Element class.
+         *
+         * This destructor is responsible for properly deallocating all the memory
+         * allocated by the Element object.
+         *
+         * @note This destructor is also responsible for cleaning up the parent
+         * element's vector of child elements and the event handlers list.
+         */
         virtual ~Element();
 
         //
@@ -1619,305 +119,1258 @@ namespace GGUI{
             return new_element;
         }
 
-        // Use this when you want to duplicate the same element with its properties safely.
+        /**
+         * Creates a deep copy of this Element, including all its children.
+         * @return A new Element object that is a copy of this one.
+         */
         Element* Copy();
 
+        // @brief Marks the Element as fully dirty by setting all stain types.
+        // 
+        // This function sets each stain type on the Dirty object, indicating
+        // that the Element needs to be reprocessed for all attributes.
         virtual void Fully_Stain();
 
-        // If you want to make a representing element* that isnt the same as the Abstract one.
-        // Then Remember to USE THIS!
+        
+        /**
+         * @brief Copies the state of the abstract element to the current element.
+         *
+         * This function will copy the state of the abstract element to the current element.
+         * It will copy the following states: focused and show.
+         *
+         * @param abstract The abstract element to copy the state from.
+         */
         void Inherit_States_From(Element* abstract);
 
+        /**
+         * @brief Accumulates all the classes and their styles.
+         * @details This method accumulates all the classes and their styles to the
+         *          current element.
+         */
         void Parse_Classes();
 
+        /**
+         * @brief Returns the Dirty object for the Element.
+         * @details This function returns the Dirty object, which is a bitfield
+         *          that keeps track of what needs to be reprocessed on the
+         *          Element when it is asked to render.
+         * @return A reference to the Dirty object.
+         */
         STAIN& Get_Dirty(){
             return Dirty;
         }
 
+
+        /**
+         * @brief Returns true if the element is currently focused.
+         * @return A boolean indicating whether the element is focused.
+         */
         bool Is_Focused(){
             return Focused;
         }
 
+        /**
+         * @brief Sets the focus state of the element.
+         * @details Sets the focus state of the element to the given value.
+         *          If the focus state changes, the element will be dirtied and the frame will be updated.
+         * @param f The new focus state.
+         */
         void Set_Focus(bool f);
 
+        /**
+         * @brief Returns true if the element is currently hovered.
+         * @return A boolean indicating whether the element is hovered.
+         */
         bool Is_Hovered(){
             return Hovered;
         }
 
+        /**
+         * @brief Sets the hover state of the element.
+         * @details Sets the hover state of the element to the given value.
+         *          If the hover state changes, the element will be dirtied and the frame will be updated.
+         * @param h The new hover state.
+         */
         void Set_Hover_State(bool h);
 
+        /**
+         * @brief Executes the handler function associated with a given state.
+         * @details This function checks if there is a registered handler for the specified state.
+         *          If a handler exists, it invokes the handler function.
+         * @param s The state for which the handler should be executed.
+         */
         void Check(State s);
 
+        /**
+         * @brief Retrieves the styling information of the element.
+         * @details This function returns the current styling object associated with the element.
+         *          The styling object contains various style attributes such as colors, borders, etc.
+         * @return The styling object of the element.
+         */
         Styling Get_Style();
 
+        /**
+         * @brief Sets the styling information of the element.
+         * @details This function sets the styling information of the element to the given value.
+         *          If the element already has a styling object associated with it, the function will
+         *          copy the given styling information to the existing object. Otherwise, the function
+         *          will create a new styling object and associate it with the element.
+         * @param css The new styling information to associate with the element.
+         */
         void Set_Style(Styling css);
 
-        virtual void Calculate_Childs_Hitboxes([[maybe_unused]] unsigned int Starting_Offset = 0){}
+        /**
+         * @brief Calculates the hitboxes of all child elements of the element.
+         * @details This function calculates the hitboxes of all child elements of the element.
+         *          The hitbox of a child element is the area of the element that is actually visible
+         *          on the screen. The function takes the starting offset into the child array as an
+         *          argument. If no argument is provided, the function starts at the beginning of the
+         *          child array.
+         * @param Starting_Offset The starting offset into the child array. If no argument is provided,
+         *                         the function starts at the beginning of the child array.
+         */
+        virtual void Calculate_Childs_Hitboxes([[maybe_unused]] unsigned int Starting_Offset = 0) {}
 
+        /**
+         * @brief Handles the OR operator for two elements.
+         * @details This function is called when the OR operator is used between two elements.
+         *          It sets the style of the current element to the style of the other element.
+         * @param other The other element to handle the OR operator with.
+         * @return The current element.
+         */
         virtual Element* Handle_Or_Operator(Element* other){
+            // Set the style of the current element to the style of the other element.
             Set_Style(other->Get_Style());
 
             return this;
         }
 
+        /**
+         * @brief Adds a class to the element.
+         * @details This function adds the given class to the element's class list.
+         *          If the class does not exist in the global class map, a new ID is assigned to the class.
+         *          The element is then marked as dirty, which will trigger a re-render of the element.
+         * @param class_name The name of the class to add.
+         */
         void Add_Class(std::string class_name);
 
-        // Takes 0.0f to 1.0f
+        
+        /**
+         * @brief Sets the opacity of the element.
+         * @details This function takes a float value between 0.0f and 1.0f and sets the
+         * opacity of the element to that value. If the value is greater than 1.0f, the
+         * function will report an error and do nothing.
+         * @param[in] Opacity The opacity value to set.
+         */
         void Set_Opacity(float Opacity);
 
-        // RGBA - Alpha channel. 0 - 255
-        void Set_Opacity(unsigned char Opacity);
+        
+        /**
+         * @brief Sets the opacity of the element using an integer percentage.
+         * @details This function takes an unsigned integer value between 0 and 100, representing the opacity percentage,
+         * and sets the element's opacity. If the value is greater than 100, it will report an error and do nothing.
+         * @param[in] Opacity The opacity percentage to set.
+         */
+        void Set_Opacity(unsigned int Opacity);
 
-        BORDER_STYLE_VALUE Get_Border_Style(){
+        /**
+         * @brief Gets the current border style of the element.
+         * @details This function returns the current border style of the element.
+         *          The border style is a structure that contains the strings for
+         *          the top left corner, top right corner, bottom left corner, bottom
+         *          right corner, horizontal line, vertical line, vertical right connector,
+         *          vertical left connector, horizontal bottom connector, horizontal top
+         *          connector, and cross connector.
+         * @return The current border style of the element.
+         */
+        styled_border Get_Border_Style(){
             return Style->Border_Style;
         }
 
-        // return int as 0 - 100
-        int Get_Opacity(); 
+        /**
+         * @brief Gets the opacity of the element.
+         * @details This function returns the current opacity of the element as a float value.
+         *          The opacity is a value between 0.0 and 1.0, where 0.0 is fully transparent
+         *          and 1.0 is fully opaque.
+         * @return The current opacity of the element.
+         */
+        float Get_Opacity(); 
 
+        /**
+         * @brief Checks if the element is transparent.
+         * @details This function determines whether the element is transparent by checking
+         *          if the element's opacity is not equal to 1.0f. An opacity less than 1.0f
+         *          indicates that the element is partially or fully transparent.
+         * @return True if the element is transparent; otherwise, false.
+         */
         bool Is_Transparent();
 
+        /**
+         * @brief Gets the processed width of the element.
+         * @details This function returns the width of the element after any post-processing
+         *          has been applied. If the element has not been post-processed, the
+         *          original width of the element is returned.
+         * @return The processed width of the element.
+         */
         unsigned int Get_Processed_Width();
+
+        /**
+         * @brief Gets the processed height of the element.
+         * @details This function returns the height of the element after any post-processing
+         *          has been applied. If the element has not been post-processed, the
+         *          original height of the element is returned.
+         * @return The processed height of the element.
+         */
         unsigned int Get_Processed_Height();
 
-        // Direction: Unsupported atm!!!
-        void Show_Shadow(Vector2 Direction, RGB Shadow_Color, float Opacity = 1, float Length = 0.5);
+        /**
+         * @brief Configures and displays the shadow for the element.
+         * @details This function sets the shadow properties such as direction, color, opacity, 
+         *          and length, and applies the shadow effect to the element. It adjusts the 
+         *          element's position to account for the shadow and marks the element as dirty 
+         *          for a visual update.
+         * @param[in] Direction The direction vector of the shadow.
+         * @param[in] Shadow_Color The color of the shadow.
+         * @param[in] Opacity The opacity of the shadow, between 0.0f (fully transparent) and 1.0f (fully opaque).
+         * @param[in] Length The length of the shadow.
+         */
+        void Show_Shadow(FVector2 Direction, RGB Shadow_Color, float Opacity = 1, float Length = 0.5);
 
+        /**
+         * @brief Displays the shadow for the element.
+         * @details This function sets the shadow properties such as direction, color, opacity, and length, and applies the shadow effect to the element. It adjusts the element's position to account for the shadow and marks the element as dirty for a visual update. The direction vector of the shadow is set to (0, 0) by default, which means the shadow will appear directly below the element.
+         * @param[in] Shadow_Color The color of the shadow.
+         * @param[in] Opacity The opacity of the shadow, between 0.0f (fully transparent) and 1.0f (fully opaque).
+         * @param[in] Length The length of the shadow.
+         */
         void Show_Shadow(RGB Shadow_Color, float Opacity = 1, float Length = 0.5);
 
+        /**
+         * @brief Sets the shadow properties for the element.
+         * @details This function sets the shadow properties such as direction, color, opacity, and length, and applies the shadow effect to the element. It also marks the element as dirty for a visual update.
+         * @param[in] s The shadow properties to set.
+         */
+        void Set_Shadow(shadow s);
+
+        /**
+         * @brief Retrieves the parent element.
+         * @details This function returns the parent element of the current element.
+         *          If the element has no parent, it will return nullptr.
+         * @return A pointer to the parent element.
+         */
         Element* Get_Parent(){
             return Parent;
         }
 
+        /**
+         * @brief Sets the parent of this element.
+         * @details This function sets the parent of this element to the given element.
+         *          If the given element is nullptr, it will clear the parent of this
+         *          element.
+         * @param[in] parent The parent element to set.
+         */
         void Set_Parent(Element* parent);
 
+        /**
+         * @brief Checks if the element has the given class.
+         * @details This function takes a class name and checks if the element has the class in its class list.
+         *          If the class does not exist in the global class map, the function will return false.
+         *          If the class exists, the function will return true if the element has the class in its list.
+         * @param s The name of the class to check.
+         * @return True if the element has the class, false otherwise.
+         */
         bool Has(std::string s);
 
+        /**
+         * @brief Checks if the element has the given class ID.
+         * @details This function takes a class ID and checks if the element has the class in its class list.
+         *          If the class does not exist in the global class map, the function will return false.
+         *          If the class exists, the function will return true if the element has the class in its list.
+         * @param s The ID of the class to check.
+         * @return True if the element has the class, false otherwise.
+         */
         bool Has(int s){
+            // Iterate through the class list of the element
             for (auto i : Classes){
+                // If the class ID matches the given ID, return true
                 if (i == s)
                     return true;
             }
+            // If no match is found, return false
             return false;
         }
 
-        //returns the area which a new element could be fitted in.
+        /**
+         * @brief Get the fitting dimensions for the given child element.
+         *
+         * This function takes a child element and calculates the fitting dimensions for it.
+         * The fitting dimensions are the width and height of the child element that does not exceed the
+         * bounds of the parent element. If the child element is colliding with another child element
+         * then the fitting dimensions are reduced to the point where the collision is resolved.
+         *
+         * @param child The child element for which the fitting dimensions are calculated.
+         * @return A pair containing the width and height of the fitting dimensions.
+         */
         std::pair<unsigned int, unsigned int> Get_Fitting_Dimensions(Element* child);
 
-        // returns the maximum area of width and height which an element could be fit in.
-        // basically same as the Get_Fitting_Dimensions(), but with some extra safe checks, so use this.
+
+        /**
+         * @brief Returns the maximum dimensions of the element without exceeding the parent element's dimensions.
+         * @return A pair containing the maximum width and height of the element.
+         */
         std::pair<unsigned int, unsigned int> Get_Limit_Dimensions();
 
+        /**
+         * @brief Sets the border visibility of the element.
+         * @details This function takes a boolean as a parameter and sets the border visibility of the element accordingly.
+         *          If the new state is different from the current state, the element will be marked as dirty with the EDGE stain.
+         * @param b The new state of the border visibility.
+         */
         virtual void Show_Border(bool b);
 
-        virtual void Show_Border(bool b, bool Previus_state);
+        /**
+         * @brief Sets the border visibility of the element.
+         * @details This function toggles the border visibility based on the provided state.
+         *          If the state has changed, it updates the border visibility, marks the 
+         *          element as dirty with the EDGE stain, and updates the frame.
+         * @param b The desired state of the border visibility.
+         * @param Previous_State The current state of the border visibility.
+         */
+        virtual void Show_Border(bool b, bool Previous_state);
 
+        /**
+         * @brief Checks if the element has a border.
+         * @details This function checks if the element has a border.
+         *          It returns true if the element has a border, false otherwise.
+         * @return True if the element has a border, false otherwise.
+         */
         bool Has_Border();
 
-        // NOTE: This will also HIDE ALL children in the AST beneath this element!!!
+        /**
+         * @brief Displays or hides the element and all its children.
+         * @details This function changes the display status of the element and all its children.
+         *          If the element is displayed, all its children are also displayed. If the element is hidden,
+         *          all its children are also hidden.
+         * @param f A boolean indicating whether to display (true) or hide (false) the element and its children.
+         */
         void Display(bool f);
 
+        /**
+         * @brief Returns whether the element is currently displayed.
+         * @details This function is used to check whether the element is currently displayed or hidden.
+         *          It returns true if the element is displayed and false if the element is hidden.
+         * @return A boolean indicating whether the element is displayed (true) or hidden (false).
+         */
         bool Is_Displayed();
 
+        /**
+         * @brief Adds a child element to the element.
+         * @details This function adds a child element to the element. If the element has a border, it will
+         *          be taken into account when calculating the size of the parent element. If the child element
+         *          exceeds the size of the parent element, the parent element will be resized to fit the child
+         *          element. If the parent element is not allowed to resize, the child element will be resized to
+         *          fit the parent element.
+         * @param Child The child element to add.
+         */
         virtual void Add_Child(Element* Child);
 
+        /**
+         * @brief Adds a vector of child elements to the current element.
+         * @param childs The vector of child elements to add.
+         *
+         * This function adds all the child elements to the current element by calling the Add_Child function for each element in the vector.
+         * It also marks the current element as dirty with the DEEP stain after adding all the elements.
+         */
         virtual void Set_Childs(std::vector<Element*> childs);
 
+        /**
+         * @brief Check if any children have changed.
+         * @details This function will check if any of the children have changed, this is used to determine if the element needs to be re-drawn.
+         * @return true if any children have changed, false otherwise.
+         */
         bool Children_Changed();
         
+        /**
+         * @brief Check if there are any transparent children.
+         * @details This function determines if the current element or any of its children
+         *          are transparent and require redrawing.
+         * @return True if any child is transparent and not clean; otherwise, false.
+         */
         bool Has_Transparent_Children();    
 
+        /**
+         * @brief Retrieves the list of child elements.
+         * @details This function returns a reference to the vector containing all child elements
+         *          associated with the current element's style.
+         * @return A reference to the vector of child elements.
+         */
         virtual std::vector<Element*>& Get_Childs();
 
+        /**
+         * @brief Removes a child element from the current element.
+         * @param handle The pointer to the child element to be removed.
+         * @return true if the element was successfully removed, false if not.
+         *
+         * This function iterates through the vector of child elements and checks
+         * if the element at the current index is equal to the handle passed as an argument.
+         * If it is, the element is deleted and the parent element is marked as dirty with the DEEP and COLOR stains.
+         * If the currently focused element is the one being removed, the mouse position is set to the parent element's position.
+         */
         virtual bool Remove(Element* handle);
 
+        /**
+         * @brief Removes the element at a given index from the list of child elements.
+         * @details This function checks if the index is valid (i.e. if the index is within the bounds of the vector of child elements).
+         *          If the index is valid, it removes the element at the specified index from the vector of child elements and deletes the element.
+         *          If the index is invalid, the function returns false.
+         * @param index The index of the element to remove.
+         * @return True if the element was successfully removed, false otherwise.
+         */
         virtual bool Remove(unsigned int index);
 
+        /**
+         * @brief Set the width and height of the element.
+         * @details This function sets the width and height of the element to the specified values.
+         *          If the width or height is different from the current width or height, then the element will be resized and the STRETCH stain is set.
+         *          The Update_Frame() function is also called to update the frame.
+         * @param width The new width of the element.
+         * @param height The new height of the element.
+         */
         void Set_Dimensions(unsigned int width, unsigned int height);
 
+        /**
+         * @brief Get the width of the element.
+         * @details This function returns the width of the element.
+         * @return The width of the element.
+         */
         unsigned int Get_Width();
 
+        /**
+         * @brief Get the height of the element.
+         * @details This function returns the height of the element.
+         * @return The height of the element.
+         */
         unsigned int Get_Height();
 
+        /**
+         * @brief Set the width of the element.
+         * @details This function sets the width of the element to the specified value.
+         *          If the width is different from the current width, then the element will be resized and the STRETCH stain is set.
+         *          The Update_Frame() function is also called to update the frame.
+         * @param width The new width of the element.
+         */
         void Set_Width(unsigned int width);
 
+        /**
+         * @brief Set the height of the element.
+         * @details This function sets the height of the element to the specified value.
+         *          If the height is different from the current height, then the element will be resized and the STRETCH stain is set.
+         *          The Update_Frame() function is also called to update the frame.
+         * @param height The new height of the element.
+         */
         void Set_Height(unsigned int height);
 
-        void Set_Position(Coordinates c);
+        /**
+         * @brief Set the position of the element.
+         * @details This function sets the position of the element to the specified coordinates.
+         *          If the position changes, the element will be marked as dirty for movement
+         *          and the frame will be updated.
+         * @param c The new position of the element.
+         */
+        void Set_Position(IVector3 c);
        
-        void Set_Position(Coordinates* c);
+        /**
+         * @brief Set the position of the element.
+         * @details This function sets the position of the element to the specified coordinates.
+         *          If the position changes, the element will be marked as dirty for movement
+         *          and the frame will be updated.
+         * @param c The new position of the element.
+         */
+        void Set_Position(IVector3* c);
 
-        Coordinates Get_Position();
+        /**
+         * @brief Get the position of the element.
+         * @details This function retrieves the position of the element from its style.
+         * @return The position of the element as an IVector3 object.
+         */
+        IVector3 Get_Position();
 
-        Coordinates Get_Absolute_Position();
+        /**
+         * @brief Get the absolute position of the element.
+         * @details This function returns the cached absolute position of the element.
+         *          The absolute position is the position of the element in the context of the entire document or window.
+         * @return The absolute position of the element as an IVector3 object.
+         */
+        IVector3 Get_Absolute_Position();
 
+        /**
+         * @brief Update the absolute position cache of the element.
+         * @details This function updates the cached absolute position of the element by adding the position of the element to the position of its parent.
+         */
         void Update_Absolute_Position_Cache();
 
-        void Set_Margin(MARGIN_VALUE margin);
+        /**
+         * @brief Set the margin of the element.
+         * @details This function sets the margin of the element to the specified margin values.
+         *          The margin is stored in the element's style.
+         * @param margin The new margin values for the element.
+         */
+        void Set_Margin(margin margin);
 
-        MARGIN_VALUE Get_Margin();
-
+        /**
+         * @brief Get the margin of the element.
+         * @details This function retrieves the margin of the element from its style.
+         * @return The margin of the element as a GGUI::margin object.
+         */
+        margin Get_Margin();
+        
+        /**
+         * @brief Sets the background color of the element.
+         * 
+         * This function sets the background color of the element to the specified RGB value. 
+         * If the border background color is the same as the current background color, 
+         * it updates the border background color as well. Marks the element as dirty for 
+         * color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the background color.
+         */
         virtual void Set_Background_Color(RGB color);
 
+        /**
+         * @brief Retrieves the background color of the element.
+         * 
+         * This function returns the RGB value of the background color 
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's background.
+         */
         RGB Get_Background_Color();
         
+        /**
+         * @brief Sets the border color of the element.
+         * 
+         * This function sets the border color of the element to the specified RGB value. Marks the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the border color.
+         */
         virtual void Set_Border_Color(RGB color);
         
+        /**
+         * @brief Retrieves the border color of the element.
+         * 
+         * This function returns the RGB value of the border color 
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's border.
+         */
         RGB Get_Border_Color();
 
+        /**
+         * @brief Sets the border background color of the element.
+         * 
+         * This function sets the border background color of the element to the specified RGB value.
+         * It marks the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the border background color.
+         */
         virtual void Set_Border_Background_Color(RGB color);
         
+        /**
+         * @brief Retrieves the border background color of the element.
+         * 
+         * This function returns the RGB value of the border background color
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's border background.
+         */
         RGB Get_Border_Background_Color();
         
+        /**
+         * @brief Sets the text color of the element.
+         * 
+         * This function sets the text color of the element to the specified RGB value. 
+         * It marks the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the text color.
+         */
         virtual void Set_Text_Color(RGB color);
 
-        void Allow_Dynamic_Size(bool True);
-
-        bool Is_Dynamic_Size_Allowed();
-
-        // Allows by default hidden overflow, so that child elements can exceed the parent element dimension limits, whiteout resizing parent.  
-        void Allow_Overflow(bool True);
-
-        bool Is_Overflow_Allowed();
-        
+        /**
+         * @brief Retrieves the text color of the element.
+         * 
+         * This function returns the RGB value of the text color
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's text.
+         */
         RGB Get_Text_Color();
 
-        static std::pair<std::pair<unsigned int, unsigned int> ,std::pair<std::pair<unsigned int, unsigned int>, std::pair<unsigned int, unsigned int>>> Get_Fitting_Area(GGUI::Element* Parent, GGUI::Element* Child);
+        /**
+         * @brief Sets the hover border color of the element.
+         * 
+         * This function sets the border color of the element when the mouse hovers over it
+         * to the specified RGB value. Marks the element as dirty for color updates and
+         * triggers a frame update.
+         * 
+         * @param color The RGB color to set as the hover border color.
+         */
+        void Set_Hover_Border_Color(RGB color);
 
+        /**
+         * @brief Retrieves the hover border color of the element.
+         * 
+         * This function returns the RGB value of the border color when the mouse hovers over the element
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's hover border.
+         */
+        RGB Get_Hover_Border_Color();
+
+        /**
+         * @brief Sets the hover background color of the element.
+         * 
+         * This function sets the background color of the element when the mouse hovers over it
+         * to the specified RGB value. Marks the element as dirty for color updates and triggers
+         * a frame update.
+         * 
+         * @param color The RGB color to set as the hover background color.
+         */
+        void Set_Hover_Background_Color(RGB color);
+
+        /**
+         * @brief Retrieves the hover background color of the element.
+         * 
+         * This function returns the RGB value of the background color when the mouse hovers over the element
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's hover background.
+         */
+        RGB Get_Hover_Background_Color();
+
+        /**
+         * @brief Sets the hover text color of the element.
+         * 
+         * This function sets the text color of the element when the mouse hovers over it
+         * to the specified RGB value. Marks the element as dirty for color updates and triggers
+         * a frame update.
+         * 
+         * @param color The RGB color to set as the hover text color.
+         */
+        void Set_Hover_Text_Color(RGB color);
+
+        /**
+         * @brief Retrieves the hover text color of the element.
+         * 
+         * This function returns the RGB value of the text color when the mouse hovers over the element
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's hover text.
+         */
+        RGB Get_Hover_Text_Color();
+
+        /**
+         * @brief Sets the hover border background color of the element.
+         * 
+         * This function sets the background color of the element's border 
+         * when the mouse hovers over it to the specified RGB value. It marks 
+         * the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the hover border background color.
+         */
+        void Set_Hover_Border_Background_Color(RGB color);
+
+        /**
+         * @brief Retrieves the hover border background color of the element.
+         * 
+         * This function returns the RGB value of the background color of the element's border
+         * when the mouse hovers over it from the element's style.
+         * 
+         * @return The RGB color of the element's hover border background.
+         */
+        RGB Get_Hover_Border_Background_Color();
+
+        /**
+         * @brief Sets the focus border color of the element.
+         * 
+         * This function sets the color of the element's border when it is focused to the specified RGB value. It marks the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the focus border color.
+         */
+        void Set_Focus_Border_Color(RGB color);
+
+        /**
+         * @brief Retrieves the focus border color of the element.
+         * 
+         * This function returns the RGB value of the border color when the element is focused
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's focus border.
+         */
+        RGB Get_Focus_Border_Color();
+
+        /**
+         * @brief Sets the focus background color of the element.
+         * 
+         * This function sets the background color of the element when it is focused to the specified RGB value. It marks the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the focus background color.
+         */
+        void Set_Focus_Background_Color(RGB color);
+
+        /**
+         * @brief Retrieves the focus background color of the element.
+         * 
+         * This function returns the RGB value of the background color when the element is focused
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's focus background.
+         */
+        RGB Get_Focus_Background_Color();
+
+        /**
+         * @brief Sets the focus text color of the element.
+         * 
+         * This function sets the text color of the element when it is focused to the specified RGB value. It marks the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the focus text color.
+         */
+        void Set_Focus_Text_Color(RGB color);
+
+        /**
+         * @brief Retrieves the focus text color of the element.
+         * 
+         * This function returns the RGB value of the text color when the element is focused
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's focus text.
+         */
+        RGB Get_Focus_Text_Color();
+
+        /**
+         * @brief Sets the focus border background color of the element.
+         * 
+         * This function sets the focus border background color of the element to the specified RGB value.
+         * It marks the element as dirty for color updates and triggers a frame update.
+         * 
+         * @param color The RGB color to set as the focus border background color.
+         */
+        void Set_Focus_Border_Background_Color(RGB color);
+
+        /**
+         * @brief Retrieves the focus border background color of the element.
+         * 
+         * This function returns the RGB value of the focus border background color
+         * from the element's style.
+         * 
+         * @return The RGB color of the element's focus border background.
+         */
+        RGB Get_Focus_Border_Background_Color();
+
+        /**
+         * @brief Sets the alignment of the element.
+         * 
+         * This function sets the alignment of the element to the specified ALIGN value.
+         * 
+         * @param Align The alignment value to set for the element.
+         */
+        void Set_Align(ALIGN a);
+
+        /**
+         * @brief Sets the alignment of the element.
+         * 
+         * This function sets the alignment of the element to the specified ALIGN value.
+         * 
+         * @param Align The alignment value to set for the element.
+         */
+        ALIGN Get_Align();
+
+        /**
+         * @brief Sets the flow priority of the element.
+         * 
+         * This function sets the flow priority of the element to the specified DIRECTION value.
+         * The flow priority determines how the element will be aligned in its parent when the parent is a flow layout.
+         * 
+         * @param Priority The flow priority value to set for the element.
+         */
+        void Set_Flow_Priority(DIRECTION d);
+
+        /**
+         * @brief Retrieves the flow priority of the element.
+         * 
+         * This function returns the DIRECTION value that was previously set with Set_Flow_Priority.
+         * The flow priority determines how the element will be aligned in its parent when the parent is a flow layout.
+         * 
+         * @return The flow priority value of the element.
+         */
+        DIRECTION Get_Flow_Priority();
+
+        /**
+         * @brief Sets whether the element will wrap its contents to the next line when it hits the edge of the screen.
+         * 
+         * This function sets whether the element will wrap its contents to the next line when it hits the edge of the screen.
+         * If true, the element will wrap its contents to the next line when it hits the edge of the screen.
+         * If false, the element will not wrap its contents to the next line when it hits the edge of the screen.
+         * 
+         * @param Wrap The value to set for whether the element will wrap its contents to the next line.
+         */
+        void Set_Wrap(bool w);
+
+        /**
+         * @brief Retrieves the wrap setting of the element.
+         * 
+         * This function returns whether the element will wrap its contents to the next line
+         * when it reaches the edge of the screen.
+         * 
+         * @return True if the element will wrap its contents, false otherwise.
+         */
+        bool Get_Wrap();
+
+        /**
+         * @brief Sets whether the element is allowed to dynamically resize.
+         * 
+         * This function enables or disables the ability of the element to 
+         * adjust its size based on its content.
+         * 
+         * @param True A boolean indicating whether dynamic resizing is allowed.
+         */
+        void Allow_Dynamic_Size(bool True);
+
+        /**
+         * @brief Checks whether the element is allowed to dynamically resize.
+         * 
+         * This function checks the Allow_Dynamic_Size property in the element's style
+         * and returns its value.
+         * 
+         * @return True if the element is allowed to dynamically resize, false otherwise.
+         */
+        bool Is_Dynamic_Size_Allowed();
+
+        /**
+         * @brief Sets whether the element allows overflow.
+         * 
+         * This function enables or disables the overflow property of the element,
+         * allowing child elements to exceed the parent's dimensions without resizing it.
+         * 
+         * @param True A boolean indicating whether overflow is allowed.
+         */ 
+        void Allow_Overflow(bool True);
+
+        /**
+         * @brief Checks whether the element allows overflow.
+         * 
+         * This function checks the Allow_Overflow property in the element's style
+         * and returns its value.
+         * 
+         * @return True if the element allows overflow, false otherwise.
+         */
+        bool Is_Overflow_Allowed();
+        
+        /**
+         * @brief Gets the fitting area for a child element in its parent.
+         * @details This function calculates the area where the child element should be rendered within the parent element.
+         *          It takes into account the border offsets of both the parent and the child element as well as their positions.
+         *          The function returns a pair of pairs, where the first pair contains the negative offset of the child element from the parent element,
+         *          the second pair contains the starting offset of the child element within the parent element and the third pair contains the ending offset of the child element within the parent element.
+         * @param Parent The parent element.
+         * @param Child The child element.
+         * @return A pair of pairs containing the fitting area for the child element within the parent element.
+         */
+        static std::pair<std::pair<unsigned int, unsigned int> ,std::pair<std::pair<unsigned int, unsigned int>, std::pair<unsigned int, unsigned int>>> Get_Fitting_Area(GGUI::Element* Parent, GGUI::Element* Child);
+                
+        /**
+         * @brief Recursively computes the size of the element based on its children.
+         * 
+         * This function will go through all the elements that are being displayed and
+         * compute their size based on the size of their children. If the element has
+         * children and the children have changed, then the element will be resized
+         * to fit the children. If the element does not have children, then the function
+         * will not do anything.
+         * 
+         * @note This function is called automatically by the framework when the
+         *       elements are being rendered. It is not necessary to call this function
+         *       manually.
+         */
         void Compute_Dynamic_Size();
 
+        /**
+         * @brief Renders the element and its children into the Render_Buffer nested buffer of the window.
+         * @details This function processes the element to generate a vector of UTF objects representing the current state.
+         * It handles different stains such as CLASS, STRETCH, COLOR, and EDGE to ensure the element is rendered correctly.
+         * @return A vector of UTF objects representing the rendered element and its children.
+         */
         virtual std::vector<GGUI::UTF>& Render();
 
-        // Used to update the parent when the child cannot update on itself, for an example on removal of an element.
+        /**
+         * @brief Updates the parent element of the current element.
+         * @details This function is called when the current element is added, removed, or moved
+         *          to a different parent element. It marks the parent element as dirty and
+         *          requests a render update.
+         * @param New_Element The new parent element.
+         *
+         * @note If the parent element does not have a valid render buffer (i.e., its
+         *       `Is_Displayed()` function returns false), this function marks the parent
+         *       element as dirty with the `STAIN_TYPE::DEEP` and `STAIN_TYPE::COLOR` stains.
+         *       This ensures that the parent element is re-rendered from scratch when the
+         *       rendering thread is updated.
+         */
         virtual void Update_Parent(Element* New_Element);
 
+        /**
+         * @brief Add the border of the window to the rendered string.
+         *
+         * @param w The window to add the border for.
+         * @param Result The string to add the border to.
+         */
         virtual void Add_Overhead(Element* w, std::vector<UTF>& Result);
 
+        /**
+         * @brief Apply the color system to the rendered string.
+         *
+         * This function applies the color system set by the style to the rendered string.
+         * It is called after the element has been rendered and the result is stored in the
+         * Result vector.
+         *
+         * @param w The window to apply the color system to.
+         * @param Result The vector containing the rendered string.
+         */
         virtual void Apply_Colors(Element* w, std::vector<UTF>& Result);
 
+        /**
+         * @brief Resizes the element to fit the size of its parent element.
+         * @details This function is called when the parent element is resized and the
+         *          current element is a child of the parent element. It resizes the
+         *          current element to fit the size of its parent element. If the parent
+         *          element does not have a valid render buffer (i.e., its
+         *          `Is_Displayed()` function returns false), this function does
+         *          nothing.
+         * @param parent The parent element to resize to.
+         * @return true if the resize was successful, false otherwise.
+         */
         virtual bool Resize_To([[maybe_unused]] Element* parent){
             return false;
         }
 
+        /**
+         * @brief Compute the alpha blending of the source element to the destination element.
+         * @details This function takes two UTF elements as arguments, the source element and the destination element.
+         *          It calculates the alpha blending of the source element to the destination element, by adding the
+         *          background color of the source element to the destination element, but only if the source element has
+         *          a non-zero alpha value. If the source element has full opacity, then the destination gets fully rewritten
+         *          over. If the source element has full transparency, then nothing is done.
+         * @param Dest The destination element to which the source element will be blended.
+         * @param Source The source element which will be blended to the destination element.
+         */
         void Compute_Alpha_To_Nesting(GGUI::UTF& Dest, GGUI::UTF Source);
 
+        /**
+         * @brief Nests a child element into a parent element.
+         * @details This function calculates the area where the child element should be rendered within the parent element.
+         *          It takes into account the border offsets of both the parent and the child element as well as their positions.
+         *          The function then copies the contents of the child element's buffer into the parent element's buffer at the calculated position.
+         * @param Parent The parent element.
+         * @param Child The child element.
+         * @param Parent_Buffer The parent element's buffer.
+         * @param Child_Buffer The child element's buffer.
+         */
         void Nest_Element(Element* Parent, Element* Child, std::vector<UTF>& Parent_Buffer, std::vector<UTF>& Child_Buffer);
 
+        /**
+         * @brief Returns a map of the custom border symbols for the given element.
+         * @param e The element to get the custom border map for.
+         * @return A map of the custom border symbols where the key is the bit mask of the border and the value is the corresponding symbol.
+         */
         std::unordered_map<unsigned int, const char*> Get_Custom_Border_Map(Element* e);
 
-        std::unordered_map<unsigned int, const char*> Get_Custom_Border_Map(GGUI::BORDER_STYLE_VALUE custom_border_style);
+        /**
+         * @brief Returns a map of the custom border symbols for the given border style.
+         * The map key is the bit mask of the border and the value is the corresponding symbol.
+         * @param custom_border_style The custom border style to get the map for.
+         * @return A map of the custom border symbols.
+         */
+        std::unordered_map<unsigned int, const char*> Get_Custom_Border_Map(GGUI::styled_border custom_border_style);
 
-        void Set_Custom_Border_Style(GGUI::BORDER_STYLE_VALUE style);
+        /**
+         * @brief Sets the custom border style for the element.
+         * @details This function sets the custom border style for the element, marks the element's edges as dirty, and ensures that the border is visible.
+         * @param style The custom border style to set.
+         */
+        void Set_Custom_Border_Style(GGUI::styled_border style);
 
-        GGUI::BORDER_STYLE_VALUE Get_Custom_Border_Style();
+        /**
+         * @brief Gets the custom border style of the element.
+         * @return The custom border style of the element.
+         */
+        GGUI::styled_border Get_Custom_Border_Style();
 
+        /**
+         * @brief Posts a process that handles the intersection of borders between two elements and their parent.
+         * @details This function posts a process that handles the intersection of borders between two elements and their parent.
+         *          The process calculates the intersection points of the borders and then constructs a bit mask that portraits the connections the middle point has.
+         *          With the calculated bit mask it can fetch from the 'SYMBOLS::Border_Identifiers' the right border string.
+         * @param A The first element.
+         * @param B The second element.
+         * @param Parent_Buffer The buffer of the parent element.
+         */
         void Post_Process_Borders(Element* A, Element* B, std::vector<UTF>& Parent_Buffer);
 
+        /**
+         * @brief Composes the RGB values of the text color and background color of the element.
+         * 
+         * This function will return a pair of RGB values, where the first element is the
+         * color of the text and the second element is the color of the background.
+         * 
+         * If the element is focused, the function will return the RGB values of the focused
+         * text color and background color. If the element is hovered, the function will
+         * return the RGB values of the hovered text color and background color. Otherwise,
+         * the function will return the RGB values of the normal text color and background
+         * color.
+         * 
+         * @return A pair of RGB values representing the text color and background color of the element.
+         */
         std::pair<RGB, RGB>  Compose_All_Text_RGB_Values();
 
+        /**
+         * @brief Composes the RGB values of the text color of the element.
+         * 
+         * This function will return the RGB values of the text color of the element.
+         * If the element is focused, the function will return the RGB values of the focused
+         * text color. If the element is hovered, the function will return the RGB values of the hovered
+         * text color. Otherwise, the function will return the RGB values of the normal text color.
+         * 
+         * @return The RGB color of the element's text.
+         */
         RGB  Compose_Text_RGB_Values();
+        
+        /**
+         * @brief Composes the RGB values of the background color of the element.
+         * 
+         * This function will return the RGB values of the background color of the element.
+         * If the element is focused, the function will return the RGB values of the focused
+         * background color. If the element is hovered, the function will return the RGB values of the hovered
+         * background color. Otherwise, the function will return the RGB values of the normal background color.
+         * 
+         * @return The RGB color of the element's background.
+         */
         RGB  Compose_Background_RGB_Values();
 
+        /**
+         * @brief Composes the RGB values of the border color and background color of the element.
+         * @details This function will return the RGB values of the border color and background color of the element.
+         * If the element is focused, the function will return the RGB values of the focused border color and background color.
+         * If the element is hovered, the function will return the RGB values of the hovered border color and background color.
+         * Otherwise, the function will return the RGB values of the normal border color and background color.
+         * @return A pair of RGB values representing the border color and background color of the element.
+         */
         std::pair<RGB, RGB>  Compose_All_Border_RGB_Values();
 
+        /**
+         * @brief Returns the name of the element.
+         * @details This function returns a string that represents the name of the element.
+         *          The name is constructed by concatenating the name of the element with the 
+         *          class name of the element, separated by a "<" and a ">".
+         * @return The name of the element.
+         */
         virtual std::string Get_Name() const {
             return "Element<" + Name + ">";
         }
 
+        /**
+         * @brief Set the name of the element.
+         * @details This function sets the name of the element and stores it in the global Element_Names map.
+         * @param name The name of the element.
+         */
         void Set_Name(std::string name);
 
-        bool Has_Internal_Changes();
-
-        //Makes suicide.
+        /**
+         * @brief Removes the element from the parent element.
+         * @details This function first checks if the element has a parent.
+         *          If the element has a parent, it calls the parent's Remove() function to remove the element from the parent.
+         *          If the element does not have a parent, it prints an error message to the console.
+         *          The function does not update the frame, so it is the caller's responsibility to update the frame after calling this function.
+         */
         void Remove();
 
-        //Event handlers
+        /**
+         * @brief A function that registers a lambda to be executed when the element is clicked.
+         * @details The lambda is given a pointer to the Event object that triggered the call.
+         *          The lambda is expected to return true if it was successful and false if it failed.
+         * @param action The lambda to be called when the element is clicked.
+         */
         void On_Click(std::function<bool(GGUI::Event*)> action);
 
+        /**
+         * @brief A function that registers a lambda to be executed when the element is interacted with in any way.
+         * @details The lambda is given a pointer to the Event object that triggered the call.
+         *          The lambda is expected to return true if it was successful and false if it failed.
+         * @param criteria The criteria to check for when deciding whether to execute the lambda.
+         * @param action The lambda to be called when the element is interacted with.
+         * @param GLOBAL Whether the lambda should be executed even if the element is not under the mouse.
+         */
         void On(unsigned long long criteria, std::function<bool(GGUI::Event*)> action, bool GLOBAL = false);
 
-        //This function returns nullptr, if the element could not be found.
+        /**
+         * @brief Retrieves an element by name.
+         * @details This function takes a string argument representing the name of the element
+         *          and returns a pointer to the element if it exists in the global Element_Names map.
+         * @param name The name of the element to retrieve.
+         * @return A pointer to the element if it exists; otherwise, nullptr.
+         */
         Element* Get_Element(std::string name);
 
         // TEMPLATES
         //-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_
 
-        //This function returns all child elements that have the same element type.
+        /**
+         * @brief Retrieves all child elements that have the same type as the given template.
+         * @details This function takes a template argument representing the type of the elements to retrieve.
+         *          It goes through the child AST, and checks if the element in question is the same type as the template T.
+         *          If the element in question is of the same type as the template T, it adds it to the result vector.
+         *          The function then recursively goes through the child AST, and checks if any of the child elements are of the same type as the template T.
+         *          If any of the child elements are of the same type as the template T, it adds them to the result vector.
+         *          The function then returns the result vector, which contains all child elements that have the same type as the given template.
+         * @param T The type of the elements to retrieve.
+         * @return A vector of pointers to the elements that have the same type as the given template.
+         */
         template<typename T>
         std::vector<T*> Get_Elements(){
-
-            //go throgh the child AST, and check if the element in question is same type as the template T.
             std::vector<T*> result;
 
+            // Check if the element in question is of the same type as the template T.
             if (typeid(*this) == typeid(T)){
                 result.push_back((T*)this);
             }
 
-            for (auto e : Childs){
+            // Go through the child AST, and check if any of the child elements are of the same type as the template T.
+            for (auto e : Style->Childs){
+                // Recursively go through the child AST, and check if any of the child elements are of the same type as the template T.
                 std::vector<T*> child_result = e->Get_Elements<T>();
+
+                // Add the results of the recursive call to the result vector.
                 result.insert(result.end(), child_result.begin(), child_result.end());
             }
 
+            // Return the result vector, which contains all child elements that have the same type as the given template.
             return result;
         }
 
-        std::vector<Element*> Get_All_Nested_Elements(bool Show_Hidden = false){
+        /**
+         * @brief Retrieves all nested elements, including this element.
+         * @details This function collects all nested elements recursively, starting from this element.
+         *          If 'Show_Hidden' is false, hidden elements are excluded from the result.
+         * @param Show_Hidden Flag to determine whether to include hidden elements in the result.
+         * @return A vector of pointers to all nested elements.
+         */
+        std::vector<Element*> Get_All_Nested_Elements(bool Show_Hidden = false) {
             std::vector<Element*> result;
 
+            // If the element is not visible and hidden elements should not be shown, return an empty vector.
             if (!Show && !Show_Hidden)
                 return {};
-            
+
+            // Add the current element to the result vector.
             result.push_back(this);
 
-            for (auto e : Childs){
+            // Recursively retrieve all nested elements from child elements.
+            for (auto e : Get_Childs()) {
                 std::vector<Element*> child_result = e->Get_All_Nested_Elements(Show_Hidden);
                 result.insert(result.end(), child_result.begin(), child_result.end());
             }
 
+            // Return the result vector containing all nested elements.
             return result;
         }
 
         //-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_
 
-        // By default elements do not have inherent scrolling abilities.
+        /**
+         * @brief Default virtual function for scrolling up.
+         * @details By default, elements do not have inherent scrolling abilities.
+         *          This function is used as a base for other elements to implement their own scrolling.
+         */
         virtual void Scroll_Up() {}
+
+        /**
+         * @brief Default virtual function for scrolling down.
+         * @details By default, elements do not have inherent scrolling abilities.
+         *          This function is used as a base for other elements to implement their own scrolling.
+         */
         virtual void Scroll_Down() {}
 
+        /**
+         * @brief Reorders child elements based on their z-position.
+         * @details This function sorts the child elements of the current element by their z-coordinate
+         *          in ascending order, so that elements with a higher z-coordinate appear later in the list.
+         */
         void Re_Order_Childs();
 
+        /**
+         * @brief Focuses the element.
+         * @details This function updates the global focus information by setting the mouse position to the element's position and updating the focused element.
+         */
         void Focus();
 
+        /**
+         * @brief Adds a handler function to the state handlers map.
+         * @details This function takes a state and a handler function as arguments.
+         *          The handler function is stored in the State_Handlers map with the given state as the key.
+         * @param s The state for which the handler should be executed.
+         * @param job The handler function to be executed when the given state is triggered.
+         */
         void On_State(State s, std::function<void()> job);
 
+        /**
+         * @brief Checks if the element needs postprocessing.
+         * @details This function checks if the element needs postprocessing by checking if the element has a shadow or is transparent.
+         * @return True if the element needs postprocessing; otherwise, false.
+         */
         bool Has_Postprocessing_To_Do();
 
+        /**
+         * @brief Process the shadow of the element.
+         * @details This function processes the shadow of the element by calculating the new buffer size and creating a new buffer with the shadow.
+         *          It then offsets the shadow box buffer by the direction and blends it with the original buffer.
+         * @param Current_Buffer The buffer to be processed.
+         */
         void Process_Shadow(std::vector<GGUI::UTF>& Current_Buffer);
 
+        /**
+         * @brief Applies the opacity of the element to the given buffer.
+         * @details This function will iterate over the given buffer and apply the opacity of the element to the background and foreground of each UTF character.
+         * @param Current_Buffer The buffer to be processed.
+         */
         void Process_Opacity(std::vector<GGUI::UTF>& Current_Buffer);
 
+        /**
+         * @brief
+         * This function performs postprocessing on the rendered buffer of the element.
+         * It applies the shadow, and then the opacity to the rendered buffer.
+         * @return The postprocessed buffer.
+         */
         virtual std::vector<GGUI::UTF>& Postprocess();
 
-        // Uses the post_processed widths and height values
+        // Customization helper function
+        //-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_
+        
+        /**
+         * @brief Adds a stain to the element.
+         * @details This function adds the given stain to the element's stains list.
+         *          The stains list is used to keep track of which properties of the element need to be re-evaluated.
+         *          The function takes a STAIN_TYPE as a parameter and adds it to the list of stains.
+         * @param s The stain to be added.
+         */
+        void Add_Stain(STAIN_TYPE s){
+            Dirty.Dirty(s);
+        }
+
+        /**
+         * @brief
+         * This function determines if the given element is a direct child of this element (in the DOM tree),
+         * and if it is visible on the screen (does not go out of bounds of the parent element).
+         * @param other Child element to check
+         * @return True if the child element is visible within the bounds of the parent.
+         */
         bool Child_Is_Shown(Element* other);
     };
-
-    // UTILS : -_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_-_
-
-    // Linear interpolation function
-    template<typename T>
-    constexpr T lerp(T a, T b, T t) {
-        // Clamp t between a and b
-        return a + t * (b - a);
-    }
-
-    constexpr GGUI::RGB Lerp(GGUI::RGB A, GGUI::RGB B, float Distance) {
-        A.Red = lerp<float>(A.Red, B.Red, Distance);
-        A.Green = lerp<float>(A.Green, B.Green, Distance);
-        A.Blue = lerp<float>(A.Blue, B.Blue, Distance);
-
-        return A;
-    }
-
 }
 
 #endif

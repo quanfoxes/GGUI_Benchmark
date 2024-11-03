@@ -15,6 +15,8 @@ PROFILE = 3
 TYPE = DEBUG
 
 sources = [
+  '../Core/Utils/Style.cpp',
+
   '../Elements/Element.cpp',
   '../Elements/Window.cpp',
   '../Elements/List_View.cpp',
@@ -27,6 +29,7 @@ sources = [
   '../Elements/File_Streamer.cpp',
   '../Elements/HTML.cpp',
 
+  '../Core/utils/No_Inline.cpp',
   '../Core/Renderer.cpp',
 
   '../Core/main.cpp',
@@ -40,9 +43,15 @@ SIMD_MODE = AVX
 
 cpp_args = [
   '-fpermissive', 
-  '-Wno-narrowing', 
-  SIMD_MODE
+  '-Wno-narrowing'
 ]
+
+# Check if we're on an Android environment
+if host_machine.system() == 'android'
+  message('Android environment detected: Disabling SIMD flags')
+else
+  cpp_args += [SIMD_MODE]
+endif
 
 link_args = []
 

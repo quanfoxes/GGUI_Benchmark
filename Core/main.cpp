@@ -1,16 +1,37 @@
 #include "ggui.h"
 
+#include <math.h>
+
 using namespace GGUI;
 
 int main() 
 {
-    Window* Main = Init_GGUI();
+    GGUI::GGUI([&](){
+        GGUI::Terminal_Canvas* tem = new GGUI::Terminal_Canvas(
+            Styling(
+                width(GGUI::Max_Width) | height(GGUI::Max_Height)
+            )
+        );
 
-    Main->Set_Title("Your App UI");
+        for (int x = 0; x < tem->Get_Width(); x++){
+            for (int y = 0; y < tem->Get_Height(); y++){
+                GGUI::Sprite s(
+                    {
+                        {"a", {GGUI::COLOR::RED /*text color*/, GGUI::COLOR::RED /*background color*/}}, 
+                        {"b", {GGUI::COLOR::BLUE, GGUI::COLOR::BLUE}}, 
+                    },
+                    0,  // Animation offset
+                    1   // Animation speed
+                );
 
-    Text_Field* Txt = new Text_Field("Hello World!");
+                tem->Set(x, y, s, false);
+            }
+        }
 
-    Main->Add_Child(Txt);
+        tem->Flush(true);
 
-    // Your code here...
+        GGUI::Main->Add_Child(tem);
+    }, INT32_MAX);
+
+    GGUI::Exit();
 }
